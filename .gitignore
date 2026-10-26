@@ -5,3 +5,8 @@ node_modules
 .env*.local
 .env
 .dev.vars
+next-env.d.ts
+cloudflare-env.d.ts
+*.tsbuildinfo
+preview/dist
+preview/shots
