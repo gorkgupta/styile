@@ -6,6 +6,7 @@ import { Badge, Button, Empty, Panel } from '@/components/ui/ui';
 import { Icon } from '@/components/ui/icons';
 import { Topbar } from './shell';
 import { money } from '@/lib/billing';
+import { fmtCoins } from '@/lib/coins';
 import { daysInRange, eachDay, RANGE_PRESETS, rangeLabel, type ReportRange } from '@/lib/report-range';
 import { dayKeyOf, fmtDateShort } from '@/lib/time';
 import type { ApptStatus, BookingSource, PayMethod, SalonReport } from '@/lib/types';
@@ -105,6 +106,7 @@ export function ReportsScreen({ report, previous, range, today, salonName }: Rep
               <div className="stack">
                 <SourcesPanel bySource={report.by_source ?? {}} />
                 <MethodsPanel byMethod={report.by_method ?? {}} />
+                <CoinsReportPanel report={report} />
               </div>
             </div>
 
@@ -366,6 +368,24 @@ function MethodsPanel({ byMethod }: { byMethod: Partial<Record<PayMethod, number
           </ul>
         </div>
       ) : <p className="small muted">No payments recorded in this period.</p>}
+    </Panel>
+  );
+}
+
+function CoinsReportPanel({ report }: { report: SalonReport }) {
+  const sold = n(report.coins_sold), bonus = n(report.coins_bonus), used = n(report.coins_redeemed), owed = n(report.coins_outstanding);
+  if (!sold && !bonus && !used && !owed) return null;
+  return (
+    <Panel title={<h2 className="row" style={{ gap: 8 }}><Icon name="coins" size={18} className="coin-title-icon" />Coins</h2>}>
+      <div className="stack">
+        <div className="coin-report">
+          <div><div className="small muted">Coins sold</div><div className="coin-report-value num">{money(Math.round(sold))}</div><div className="tiny muted">Received in this period</div></div>
+          <div><div className="small muted">Bonus given</div><div className="coin-report-value num">{fmtCoins(Math.round(bonus))}</div><div className="tiny muted">{sold ? `${pct(bonus, sold)}% on top of sales` : 'coins'}</div></div>
+          <div><div className="small muted">Coins used</div><div className="coin-report-value num">{fmtCoins(Math.round(used))}</div><div className="tiny muted">On bills, net of refunds</div></div>
+          <div><div className="small muted">Outstanding</div><div className="coin-report-value num">{money(Math.round(owed))}</div><div className="tiny muted">All clients’ balances now</div></div>
+        </div>
+        <p className="tiny muted">Coins sold are advances, not revenue — bills paid with coins already count in revenue and GST. Outstanding is services you still owe clients.</p>
+      </div>
     </Panel>
   );
 }

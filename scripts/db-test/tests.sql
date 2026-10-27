@@ -18,6 +18,15 @@ begin
   end;
   raise exception 'FAIL: % (statement was allowed)', label;
 end $$;
+create function t.err(sql text) returns text language plpgsql as $$
+begin
+  begin
+    execute sql;
+  exception when others then
+    return sqlerrm;
+  end;
+  return null;
+end $$;
 grant execute on all functions in schema t to public;
 
 -- Users
@@ -256,6 +265,110 @@ select set_config('request.jwt.claims', '{}', false);
 select t.fails(format('select public.usual_stylist(%L, %L)', :'salon_a', :'isha'), 'anonymous cannot look up a usual stylist');
 reset role;
 set role authenticated;
+
+-- ===== Coins (prepaid balance, spent only at the salon that sold them) =====
+reset role;
+insert into auth.users (id, email) values ('00000000-0000-0000-0000-00000000000f', 'desk@glow.in');
+set role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-00000000000a","role":"authenticated"}', false);
+insert into public.salon_members (salon_id, user_id, role) values (:'salon_a', '00000000-0000-0000-0000-00000000000f', 'receptionist');
+-- Rohan's old number again (his login, user d, is linked to it further down)
+insert into public.customers (salon_id, name, phone) values (:'salon_a', 'Rohan M', '919811112222') returning id as coin_client \gset
+insert into public.customers (salon_id, name, phone) values (:'salon_a', 'Sneha', '919811113333') returning id as sneha \gset
+select t.ok((select coin_balance from public.customers where id = :'coin_client') = 0, 'clients start with no coins');
+select t.ok(public.fmt_inr(1234567.5) = '₹12,34,567.50' and public.fmt_inr(999) = '₹999' and public.fmt_inr(6100.00) = '₹6,100', 'amounts in messages use Indian grouping');
+select t.ok((select coins_enabled and jsonb_array_length(coin_packs) = 3 from public.salons where id = :'salon_a'), 'coins on with three default packs');
+select t.fails(format($q$update public.salons set coin_packs = '[{"pay":1000,"coins":900}]' where id = %L$q$, :'salon_a'), 'pack with fewer coins than paid rejected');
+select t.fails(format($q$update public.salons set coin_packs = '[{"pay":0,"coins":100}]' where id = %L$q$, :'salon_a'), 'pack must cost something');
+select t.fails(format($q$update public.salons set coin_packs = (select jsonb_agg(jsonb_build_object('pay', g * 1000, 'coins', g * 1100)) from generate_series(1, 9) g) where id = %L$q$, :'salon_a'), 'at most 8 coin packs');
+select t.fails(format($q$update public.salons set coin_packs = '[{"pay":"lots","coins":100}]' where id = %L$q$, :'salon_a'), 'pack values must be numbers');
+
+-- Front desk sells coins
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-00000000000f","role":"authenticated"}', false);
+select public.load_coins(:'salon_a', :'coin_client', 5000, 5500, 'upi', 'UPI 4411', null) as load1 \gset
+select t.ok((:'load1'::jsonb ->> 'balance')::numeric = 5500 and (select coin_balance from public.customers where id = :'coin_client') = 5500, 'receptionist sells the ₹5,000 pack: 5,500 coins');
+select t.ok((select count(*) = 2 and sum(coins) = 5500 and sum(amount_paid) = 5000 from public.coin_transactions where customer_id = :'coin_client')
+  and exists (select 1 from public.coin_transactions where customer_id = :'coin_client' and kind = 'load' and coins = 5000 and method = 'upi' and reference = 'UPI 4411')
+  and exists (select 1 from public.coin_transactions where customer_id = :'coin_client' and kind = 'bonus' and coins = 500 and balance_after = 5500), 'load + bonus rows written to the ledger');
+select t.fails(format($q$select public.load_coins(%L, %L, 1000, 1200, 'cash')$q$, :'salon_a', :'coin_client'), 'custom bonus rejected for receptionist');
+select t.ok((public.load_coins(:'salon_a', :'coin_client', 1000) ->> 'balance')::numeric = 6500, 'custom amount without bonus: 1 coin = ₹1');
+select t.fails(format($q$select public.load_coins(%L, %L, 500, 400, 'cash')$q$, :'salon_a', :'coin_client'), 'fewer coins than paid rejected');
+select t.fails(format($q$select public.load_coins(%L, %L, 500, null, 'wallet')$q$, :'salon_a', :'coin_client'), 'coins cannot be bought with coins');
+select t.fails(format($q$select public.load_coins(%L, %L, 'NaN')$q$, :'salon_a', :'coin_client'), 'NaN amount rejected');
+select t.fails(format($q$select public.load_coins(%L, %L, -100)$q$, :'salon_a', :'coin_client'), 'negative amount rejected');
+select t.fails(format($q$select public.adjust_coins(%L, %L, 100, 'please')$q$, :'salon_a', :'coin_client'), 'front desk cannot adjust balances');
+
+-- Paying a bill with coins
+select * from public.create_invoice(:'salon_a', jsonb_build_object('customer_id', :'coin_client',
+  'items', '[{"kind":"custom","name":"Haircut","qty":1,"unit_price":600}]'::jsonb,
+  'payments', '[{"method":"wallet","amount":400},{"method":"cash","amount":200}]'::jsonb)) \gset cinv_
+select t.ok(:'cinv_status' = 'paid' and :cinv_paid_total = 600, 'bill paid partly with coins');
+select t.ok((select coin_balance from public.customers where id = :'coin_client') = 6100, 'paying with coins reduces the balance');
+select t.ok(exists (select 1 from public.payments where invoice_id = :'cinv_id' and method = 'wallet' and amount = 400), 'coins payment recorded with method wallet');
+select t.ok(exists (select 1 from public.coin_transactions where invoice_id = :'cinv_id' and kind = 'spend' and coins = -400 and balance_after = 6100), 'spend row linked to the bill');
+select t.ok(t.err(format($q$select public.create_invoice(%L, jsonb_build_object('customer_id', %L, 'items', '[{"kind":"custom","name":"Bridal","qty":1,"unit_price":20000}]'::jsonb, 'payments', '[{"method":"wallet","amount":7000}]'::jsonb))$q$, :'salon_a', :'coin_client'))
+  = 'Not enough coins: balance ₹6,100', 'insufficient coins rejected with the balance');
+select t.ok((select coin_balance from public.customers where id = :'coin_client') = 6100
+  and (select count(*) from public.invoices where salon_id = :'salon_a' and total = 20000) = 0, 'failed bill leaves balance and bill numbers alone');
+select t.fails(format($q$select public.create_invoice(%L, '{"items":[{"kind":"custom","name":"x","qty":1,"unit_price":100}],"payments":[{"method":"wallet","amount":100}]}'::jsonb)$q$, :'salon_a'), 'coins need a client on the bill');
+select (public.create_invoice(:'salon_a', jsonb_build_object('customer_id', :'coin_client', 'items', '[{"kind":"custom","name":"Facial","qty":1,"unit_price":1000}]'::jsonb))).id as due_inv \gset
+select (public.add_payment(:'due_inv', 'wallet', 300)).status as due_status \gset
+select t.ok(:'due_status' = 'partial' and (select coin_balance from public.customers where id = :'coin_client') = 5800, 'later payment with coins (add_payment)');
+select (public.create_invoice(:'salon_a', jsonb_build_object('customer_id', :'sneha', 'items', '[{"kind":"custom","name":"Manicure","qty":1,"unit_price":700}]'::jsonb))).id as sneha_inv \gset
+select t.fails(format($q$select public.add_payment(%L, 'wallet', 100)$q$, :'sneha_inv'), 'add_payment with coins needs enough balance');
+select t.fails(format($q$select public.void_invoice(%L, 'oops')$q$, :'cinv_id'), 'front desk cannot cancel bills (no coin refunds)');
+
+-- Owner: cancel refunds coins, adjustments, custom bonus
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-00000000000a","role":"authenticated"}', false);
+select public.void_invoice(:'cinv_id', 'Billed twice by mistake') \gset
+select t.ok((select coin_balance from public.customers where id = :'coin_client') = 6200
+  and exists (select 1 from public.coin_transactions where invoice_id = :'cinv_id' and kind = 'refund' and coins = 400), 'cancelling a bill refunds the coins spent on it');
+select public.void_invoice(:'cinv_id', 'again') \gset
+select t.ok((select count(*) from public.coin_transactions where invoice_id = :'cinv_id' and kind = 'refund') = 1, 'cancelling twice refunds once');
+select public.void_invoice(:'due_inv', 'Wrong amount') \gset
+select t.ok((select coin_balance from public.customers where id = :'coin_client') = 6500, 'coins from a later payment are refunded too');
+select t.ok((public.adjust_coins(:'salon_a', :'sneha', 250, 'Goodwill for the delay') ->> 'balance')::numeric = 250, 'owner adds coins with a note');
+select t.fails(format($q$select public.adjust_coins(%L, %L, 100, '  ')$q$, :'salon_a', :'sneha'), 'adjustment needs a note');
+select t.ok(t.err(format($q$select public.adjust_coins(%L, %L, -1000, 'fix')$q$, :'salon_a', :'sneha')) like 'That would take the balance below zero%', 'adjustment never goes below zero');
+select t.ok((public.load_coins(:'salon_a', :'sneha', 1000, 1300, 'card') ->> 'balance')::numeric = 1550, 'owner can give a custom bonus');
+select t.fails(format($q$update public.customers set coin_balance = 99999 where id = %L$q$, :'coin_client'), 'direct update of coin_balance blocked');
+select t.fails(format($q$insert into public.customers (salon_id, name, phone, coin_balance) values (%L, 'Rich', '919811114444', 500)$q$, :'salon_a'), 'client cannot be created with coins');
+select t.fails(format($q$insert into public.coin_transactions (salon_id, customer_id, kind, coins, balance_after) values (%L, %L, 'adjust', 1000, 1000)$q$, :'salon_a', :'sneha'), 'ledger rows cannot be inserted directly');
+update public.coin_transactions set coins = 99999 where customer_id = :'sneha';
+delete from public.coin_transactions where customer_id = :'sneha';
+select t.ok((select count(*) = 3 and max(coins) < 99999 from public.coin_transactions where customer_id = :'sneha'), 'ledger rows cannot be edited or deleted');
+select t.fails(format($q$select public.coin_post(%L, %L, 'adjust', 100000)$q$, :'salon_a', :'sneha'), 'internal coin_post is not callable');
+select t.fails(format($q$delete from public.customers where id = %L$q$, :'sneha'), 'client with coin history cannot be deleted');
+update public.salons set coins_enabled = false where id = :'salon_a';
+select t.fails(format($q$select public.load_coins(%L, %L, 100)$q$, :'salon_a', :'sneha'), 'no coin sales while coins are turned off');
+select t.ok((public.add_payment(:'sneha_inv', 'wallet', 700)).status = 'paid', 'existing coins still spendable when sales are off');
+update public.salons set coins_enabled = true where id = :'salon_a';
+select public.salon_report(:'salon_a', (now() at time zone 'Asia/Kolkata')::date, (now() at time zone 'Asia/Kolkata')::date) as crep \gset
+select t.ok((:'crep'::jsonb ->> 'coins_sold')::numeric = 7000 and (:'crep'::jsonb ->> 'coins_bonus')::numeric = 800
+  and (:'crep'::jsonb ->> 'coins_redeemed')::numeric = 700 and (:'crep'::jsonb ->> 'coins_outstanding')::numeric = 7350
+  and (:'crep'::jsonb ->> 'revenue')::numeric > 0, 'report: coins sold, bonus, used and outstanding');
+
+-- Stylist
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-00000000000c","role":"authenticated"}', false);
+select t.fails(format($q$select public.load_coins(%L, %L, 100)$q$, :'salon_a', :'sneha'), 'stylist cannot sell coins');
+select t.fails(format($q$select public.adjust_coins(%L, %L, 100, 'x')$q$, :'salon_a', :'sneha'), 'adjust by stylist rejected');
+select t.ok((select count(*) from public.coin_transactions) = 0, 'stylist cannot see the coin ledger');
+
+-- Another salon
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-00000000000b","role":"authenticated"}', false);
+select t.ok((select count(*) from public.coin_transactions) = 0, 'other salon cannot see coin history');
+select t.fails(format($q$select public.load_coins(%L, %L, 100)$q$, :'salon_a', :'sneha'), 'other salon cannot sell coins at this salon');
+select t.fails(format($q$select public.load_coins(%L, %L, 100)$q$, :'salon_b', :'sneha'), 'other salon cannot load coins onto this salon''s client');
+select t.fails(format($q$select public.create_invoice(%L, jsonb_build_object('customer_id', %L, 'items', '[{"kind":"custom","name":"Fade","qty":1,"unit_price":300}]'::jsonb, 'payments', '[{"method":"wallet","amount":300}]'::jsonb))$q$, :'salon_b', :'sneha'), 'coins can only be spent at the salon that sold them');
+select t.fails(format($q$select public.adjust_coins(%L, %L, 100, 'x')$q$, :'salon_a', :'sneha'), 'other salon owner cannot adjust');
+
+-- The client (phone login) sees their own coins only
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-00000000000d","role":"authenticated"}', false);
+select t.ok(public.claim_customer_profiles() >= 1, 'client login links the new record');
+select t.ok((select coin_balance from public.customers where id = :'coin_client') = 6500, 'client sees own balance');
+select t.ok((select count(*) from public.coin_transactions) > 0 and not exists (select 1 from public.coin_transactions where customer_id <> :'coin_client'), 'client sees own coin history only');
+select t.ok(not exists (select 1 from public.coin_transactions where customer_id = :'sneha'), 'client cannot see other clients'' coins');
+select t.fails(format($q$select public.load_coins(%L, %L, 100)$q$, :'salon_a', :'coin_client'), 'client cannot load coins themselves');
 
 -- ===== Anonymous =====
 reset role;

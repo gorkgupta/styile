@@ -7,6 +7,7 @@ import { Icon } from '@/components/ui/icons';
 import { Topbar } from './shell';
 import { ClientFormSheet, isVip, TagBadges } from './customers';
 import { InvoiceStatusBadge } from './billing-bits';
+import { CoinsPanel, type CoinsPanelProps } from './coins';
 import { deleteCustomer, saveCustomerNotes } from '@/actions/customers';
 import { money } from '@/lib/billing';
 import { formatPhone } from '@/lib/phone';
@@ -32,9 +33,11 @@ export interface CustomerProfileProps {
   tz: string;
   canDelete: boolean;
   canBill: boolean;
+  /** Coins panel; null when the viewer's role can't see coin history (stylists). */
+  coins?: Omit<CoinsPanelProps, 'customer' | 'tz'> | null;
 }
 
-export function CustomerProfile({ customer: c, appointments, invoices, staff, today, nowIso, tz, canDelete, canBill }: CustomerProfileProps) {
+export function CustomerProfile({ customer: c, appointments, invoices, staff, today, nowIso, tz, canDelete, canBill, coins }: CustomerProfileProps) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
@@ -61,7 +64,9 @@ export function CustomerProfile({ customer: c, appointments, invoices, staff, to
     const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
     return top && top[1] >= 2 ? staffOf(top[0]) : undefined;
   })();
-  const hasHistory = appointments.length > 0 || (invoices?.length ?? 0) > 0;
+  const coinBalance = Number(c.coin_balance ?? 0);
+  const hasCoinHistory = (coins?.history.length ?? 0) > 0 || coinBalance > 0;
+  const hasHistory = appointments.length > 0 || (invoices?.length ?? 0) > 0 || hasCoinHistory;
   const shownAppts = tab === 'upcoming' ? upcoming : past;
   const bday = c.birthday ? new Intl.DateTimeFormat('en-IN', { timeZone: 'UTC', day: 'numeric', month: 'long' }).format(new Date(`${c.birthday}T00:00:00Z`)) : null;
   const bdaySoon = c.birthday ? (() => {
@@ -185,6 +190,9 @@ export function CustomerProfile({ customer: c, appointments, invoices, staff, to
           </div>
 
           <div className="stack">
+            {coins && (coins.salon.enabled || hasCoinHistory) && (
+              <CoinsPanel {...coins} customer={{ id: c.id, name: c.name, balance: coinBalance }} tz={tz} />
+            )}
             <Panel title="Notes" actions={!editingNotes && <Button size="sm" variant="ghost" icon="edit" onClick={() => setEditingNotes(true)}>{notes ? 'Edit' : 'Add'}</Button>}>
               {editingNotes ? (
                 <div className="stack">
@@ -217,7 +225,11 @@ export function CustomerProfile({ customer: c, appointments, invoices, staff, to
           ? <Button onClick={() => setDeleting(false)}>OK</Button>
           : <><Button variant="ghost" onClick={() => setDeleting(false)}>Keep client</Button><Button variant="danger" loading={pending} onClick={doDelete}>Delete client</Button></>}>
         {hasHistory
-          ? <Notice tone="warn">{c.name} has {appointments.length ? `${appointments.length} appointment${appointments.length > 1 ? 's' : ''}` : ''}{appointments.length && invoices?.length ? ' and ' : ''}{invoices?.length ? `${invoices.length} bill${invoices.length > 1 ? 's' : ''}` : ''} on record, so they can’t be deleted — that history is needed for your records and GST. Edit their details instead.</Notice>
+          ? <Notice tone="warn">{c.name} has {[
+              appointments.length ? `${appointments.length} appointment${appointments.length > 1 ? 's' : ''}` : '',
+              invoices?.length ? `${invoices.length} bill${invoices.length > 1 ? 's' : ''}` : '',
+              hasCoinHistory ? 'coin history' : '',
+            ].filter(Boolean).join(' and ')} on record, so they can’t be deleted — that history is needed for your records and GST. Edit their details instead.</Notice>
           : <p className="small ink2">This permanently removes their contact details and notes.</p>}
         {deleteError && <Notice tone="error">{deleteError}</Notice>}
       </Dialog>

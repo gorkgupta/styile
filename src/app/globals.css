@@ -1106,3 +1106,76 @@ img, svg { display: block; }
 /* salon addresses (onboarding: "glowstudio" + ".styile.com") */
 .suffix-input > .input { border-radius: var(--radius) 0 0 var(--radius); }
 .suffix-input > span { border-radius: 0 var(--radius) var(--radius) 0; border-right: 1px solid var(--line-strong); border-left: 0; white-space: nowrap; }
+
+/* coins ------------------------------------------------------------------- */
+.coin-title-icon { color: var(--marigold-700); }
+.coin-chip { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; border-radius: 999px; background: var(--marigold-50); color: var(--marigold-700); font-size: 12px; font-weight: 600; white-space: nowrap; flex: none; }
+/* client profile */
+.coin-hero { display: flex; align-items: center; gap: 14px; padding: 16px 18px; border-bottom: 1px solid var(--line); background: linear-gradient(120deg, var(--marigold-50), var(--surface) 75%); }
+.coin-hero-value { font-size: 30px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; }
+.coin-hero-value span { font-size: 15px; font-weight: 550; color: var(--ink-2); letter-spacing: 0; }
+.coin-more { display: flex; justify-content: center; padding: 6px; }
+.coin-tx-list > li.coin-tx { display: flex; align-items: flex-start; gap: 12px; }
+.coin-tx-icon { width: 30px; height: 30px; border-radius: 9px; flex: none; display: inline-flex; align-items: center; justify-content: center; margin-top: 1px; }
+.coin-tx-icon.is-in { background: var(--success-50); color: var(--success); }
+.coin-tx-icon.is-out { background: var(--paper); color: var(--ink-2); }
+.coin-tx-note { margin-top: 2px; overflow-wrap: anywhere; }
+/* POS */
+.coin-strip { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: var(--radius); background: var(--marigold-50); border: 1px solid color-mix(in srgb, var(--marigold) 35%, #fff); }
+.coin-badge { width: 34px; height: 34px; border-radius: 10px; background: var(--surface); color: var(--marigold-700); display: inline-flex; align-items: center; justify-content: center; flex: none; }
+/* sell coins sheet */
+.coin-packs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.coin-pack { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 12px 14px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface); cursor: pointer; text-align: left; font: inherit; color: inherit; }
+.coin-pack:hover { border-color: var(--ink-2); }
+.coin-pack.is-on { border-color: var(--peacock); background: var(--peacock-50); box-shadow: inset 0 0 0 1px var(--peacock); }
+.coin-pack-pay { font-weight: 650; }
+.coin-pack-get { display: inline-flex; align-items: center; gap: 4px; font-size: 14px; color: var(--ink-2); }
+.coin-pack.is-on .coin-pack-get { color: var(--peacock-700); }
+.coin-pack-bonus { margin-top: 4px; font-size: 12px; font-weight: 600; color: var(--success); background: var(--success-50); border-radius: 6px; padding: 1px 6px; }
+.coin-pack-custom .coin-pack-get { font-size: 13px; }
+.coin-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 12px 14px; border-radius: var(--radius); background: var(--paper); }
+.coin-summary > div { display: flex; flex-direction: column; gap: 2px; font-size: 13px; min-width: 0; }
+.coin-summary strong { font-size: 16px; }
+.coin-summary-bonus { display: block; font-size: 12px; font-weight: 550; color: var(--success); }
+.coin-receipt-head { display: flex; gap: 12px; align-items: center; }
+.coin-receipt-icon { width: 44px; height: 44px; border-radius: 12px; background: var(--success-50); color: var(--success); display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.coin-receipt-lines { margin: 0; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.coin-receipt-lines > div { display: flex; justify-content: space-between; gap: 12px; padding: 10px 14px; border-top: 1px solid var(--line); font-size: 14px; }
+.coin-receipt-lines > div:first-child { border-top: 0; }
+.coin-receipt-lines dt { color: var(--muted); }
+.coin-receipt-lines dd { margin: 0; text-align: right; }
+.coin-receipt-total { background: var(--paper); font-weight: 650; }
+@media print {
+  body:has(.coin-receipt) * { visibility: hidden; }
+  .sheet:has(.coin-receipt), .sheet:has(.coin-receipt) * { visibility: visible; }
+  .sheet:has(.coin-receipt) { position: absolute; inset: 0 auto auto 0; width: 100% !important; box-shadow: none; animation: none; }
+  .sheet:has(.coin-receipt) .sheet-foot, .sheet:has(.coin-receipt) .sheet-head .btn { display: none; }
+}
+/* settings */
+.coin-pack-rows { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.coin-pack-row { display: grid; grid-template-columns: 170px auto 170px minmax(0, 1fr) auto; grid-template-areas: 'pay arrow coins note del'; gap: 8px; align-items: center; }
+.coin-pack-pay-in { grid-area: pay; } .coin-pack-arrow { grid-area: arrow; } .coin-pack-coins { grid-area: coins; } .coin-pack-note { grid-area: note; } .coin-pack-del { grid-area: del; }
+.coin-pack-coins > .input { border-radius: var(--radius) 0 0 var(--radius); }
+.coin-pack-coins > span { border-left: 0; border-right: 1px solid var(--line-strong); border-radius: 0 var(--radius) var(--radius) 0; }
+@media (max-width: 600px) {
+  .coin-pack-row { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto; grid-template-areas: 'pay arrow coins del' 'note note note note'; row-gap: 2px; padding-bottom: 6px; border-bottom: 1px dashed var(--line); }
+  .coin-pack-note:empty { display: none; }
+  .coin-pack-row .prefix-input > span { padding: 0 8px; }
+  .coin-pack-row .prefix-input > .input { padding-left: 8px; padding-right: 6px; }
+}
+/* reports */
+.coin-report { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; }
+.coin-report-value { font-size: 20px; font-weight: 650; letter-spacing: -0.01em; margin-top: 2px; }
+/* client portal */
+.pt-coins { display: flex; gap: 14px; align-items: center; padding: 18px; border-radius: 16px; background: linear-gradient(135deg, var(--peacock), var(--peacock-700)); color: #fff; }
+.pt-coins-icon { width: 48px; height: 48px; border-radius: 14px; background: var(--marigold); color: #2b1a00; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.pt-coins-title { font-size: 18px; font-weight: 650; line-height: 1.3; }
+.pt-coins-sub { color: rgba(255, 255, 255, 0.82); margin-top: 2px; }
+@media (max-width: 480px) {
+  .coin-pack { padding: 10px 11px; }
+  .coin-pack-get { font-size: 13.5px; }
+  .coin-pack-bonus { font-size: 11.5px; }
+  .coin-summary { grid-template-columns: 1fr; }
+  .coin-summary > div { flex-direction: row; justify-content: space-between; align-items: baseline; }
+  .coin-summary-bonus { display: inline; margin-left: 4px; }
+}

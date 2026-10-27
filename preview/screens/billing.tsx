@@ -7,6 +7,7 @@ import { CustomerProfile, type ProfileAppointment, type ProfileInvoice } from '.
 import { resolveRange } from '../../src/lib/periods';
 import type { Customer, Invoice, InvoiceItem, PayMethod, Payment } from '../../src/lib/types';
 import { appointments, categories, customers, invoices, NOW_ISO, salon, services, staff, TODAY, TZ } from '../data';
+import { ananyaCoinHistory, ananyaCoins, coinPacks } from '../coins-data';
 
 // ---------- POS: checking out Lakshmi Menon's global colour with Meera ----------
 const lakshmiAppt = appointments.find((a) => a.customer_id === 'cu-7' && a.status === 'in_service')!;
@@ -46,13 +47,23 @@ const salonForBill = {
 const staffNames = Object.fromEntries(staff.map((s) => [s.id, s.name]));
 
 // ---------- Clients ----------
+const COIN_BALANCES: Record<string, number> = { 'cu-1': ananyaCoins, 'cu-5': 4380, 'cu-7': 11500, 'cu-3': 600 };
 const clientList: Customer[] = [
-  ...customers.map((c, i) => ({ ...c, created_at: i === 5 ? '2026-10-24T05:00:00Z' : i === 3 ? '2026-10-20T05:00:00Z' : c.created_at })),
+  ...customers.map((c, i) => ({ ...c, coin_balance: COIN_BALANCES[c.id] ?? 0, created_at: i === 5 ? '2026-10-24T05:00:00Z' : i === 3 ? '2026-10-20T05:00:00Z' : c.created_at })),
   { ...customers[0], id: 'cu-9', name: 'Meenakshi Sundaram', phone: '919176543210', tags: ['VIP'], visit_count: 31, total_spent: 84300, last_visit_at: '2026-07-14T06:00:00Z', birthday: '1985-10-30', notes: null, email: null },
   { ...customers[1], id: 'cu-10', name: 'Aditya Kulkarni', phone: '919822334455', tags: [], visit_count: 2, total_spent: 1300, last_visit_at: '2026-06-02T06:00:00Z', birthday: '1996-10-11', created_at: '2026-05-20T05:00:00Z' },
 ];
 
 const ananya = clientList[0];
+const coinsFor = (role: 'owner' | 'receptionist') => ({
+  salon: { name: salon.name, enabled: true, packs: coinPacks, waConnected: true },
+  history: ananyaCoinHistory, canSell: true, canBonus: role === 'owner', canAdjust: role === 'owner',
+});
+// Bill paid partly with coins
+const coinPayments: Payment[] = [
+  { id: 'cp1', invoice_id: 'inv-1041', method: 'wallet', amount: 3218, reference: null, created_at: '2026-10-27T06:43:00.000Z' },
+  { id: 'cp2', invoice_id: 'inv-1041', method: 'upi', amount: 2000, reference: 'UPI 7731 0042', created_at: '2026-10-27T06:43:00.000Z' },
+];
 const profileAppts: ProfileAppointment[] = [
   { id: 'pa1', start_at: appointments[3].start_at, status: 'checked_in', source: 'whatsapp', staff_id: 'st-priya', invoice_id: null, services: [{ name: 'Haircut & style', price: 900 }] },
   { id: 'pa2', start_at: '2026-11-08T05:30:00.000Z', status: 'confirmed', source: 'online', staff_id: 'st-meera', invoice_id: null, services: [{ name: 'Root touch-up', price: 1600 }] },
@@ -118,8 +129,42 @@ export const screens: Record<string, { title: string; render: () => ReactNode }>
   '/app/customers/[id]': {
     title: 'Client profile',
     render: () => (
-      <CustomerProfile customer={ananya} appointments={profileAppts} invoices={profileBills}
+      <CustomerProfile customer={ananya} appointments={profileAppts} invoices={profileBills} coins={coinsFor('owner')}
         staff={staff.map((s) => ({ id: s.id, name: s.name, color: s.color }))} today={TODAY} nowIso={NOW_ISO} tz={TZ} canDelete canBill />
+    ),
+  },
+  '/app/customers/coins-desk': {
+    title: 'Client profile (front desk, new to coins)',
+    render: () => (
+      <CustomerProfile customer={{ ...clientList[1], coin_balance: 0 }} appointments={profileAppts.slice(0, 2)} invoices={[]}
+        coins={{ ...coinsFor('receptionist'), history: [] }}
+        staff={staff.map((s) => ({ id: s.id, name: s.name, color: s.color }))} today={TODAY} nowIso={NOW_ISO} tz={TZ} canDelete={false} canBill />
+    ),
+  },
+  '/app/pos/coins': {
+    title: 'New bill (client with coins)',
+    render: () => {
+      const a = appointments.find((x) => x.customer_id === 'cu-1')!;
+      return (
+        <PosScreen
+          salon={{ pricesIncludeTax: salon.prices_include_tax, defaultGstRate: salon.default_gst_rate, waConnected: true, nextInvoiceNo: 'GS-01043' }}
+          services={services} categories={categories} staff={staff}
+          prefill={{
+            appointmentId: a.id,
+            customer: { id: ananya.id, name: ananya.name, phone: ananya.phone, visit_count: ananya.visit_count, last_visit_at: ananya.last_visit_at, coin_balance: ananyaCoins },
+            context: `Checkout · ${ananya.name} · 11:30 AM with Priya Nair`,
+            lines: [...a.services, services.find((x) => x.id === 's-blow')!].map((s) => ({ serviceId: 'service_id' in s ? s.service_id : s.id, name: s.name, price: s.price, staffId: a.staff_id, gstRate: null })),
+          }}
+        />
+      );
+    },
+  },
+  '/app/invoices/coins': {
+    title: 'Bill detail (paid partly with coins)',
+    render: () => (
+      <InvoiceDetail invoice={detailInvoice} items={detailItems} payments={coinPayments}
+        customer={{ id: ananya.id, name: ananya.name, phone: ananya.phone, email: ananya.email, coin_balance: ananyaCoins }}
+        salon={salonForBill} staffNames={staffNames} tz={TZ} canVoid />
     ),
   },
 };

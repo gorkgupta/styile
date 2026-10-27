@@ -4,8 +4,12 @@ import { InboxScreen } from '../../src/components/app/inbox';
 import { ReportsScreen } from '../../src/components/app/reports';
 import { SettingsScreen } from '../../src/components/app/settings';
 import { TeamScreen } from '../../src/components/app/team';
-import { branch, categories, conversations, messages, NOW_ISO, report, salon, services, TODAY, TZ } from '../data';
+import { branch, categories, conversations, messages, NOW_ISO, report as baseReport, services, TODAY, TZ } from '../data';
 import { portraitOf, previewSkills, profiledStaff as staff } from '../stylist-data';
+import { coinReport, salonWithCoins } from '../coins-data';
+
+const salon = salonWithCoins;
+const report = { ...baseReport, ...coinReport, by_method: { ...baseReport.by_method, wallet: 48760 } };
 
 // A couple of extra rows so the screens show archived / online-off / uncategorised states.
 const menuServices = [

@@ -7,12 +7,14 @@ import { Icon } from '@/components/ui/icons';
 import { Topbar } from './shell';
 import { saveCustomer } from '@/actions/customers';
 import { money } from '@/lib/billing';
+import { coinsText, fmtCoins } from '@/lib/coins';
 import { formatPhone } from '@/lib/phone';
 import { daysBetween, relativeAgo } from '@/lib/periods';
 import { localDate } from '@/lib/time';
 import type { Customer } from '@/lib/types';
 
-export type ClientRow = Pick<Customer, 'id' | 'name' | 'phone' | 'email' | 'gender' | 'birthday' | 'tags' | 'visit_count' | 'total_spent' | 'last_visit_at' | 'created_at'>;
+export type ClientRow = Pick<Customer, 'id' | 'name' | 'phone' | 'email' | 'gender' | 'birthday' | 'tags' | 'visit_count' | 'total_spent' | 'last_visit_at' | 'created_at'>
+  & { coin_balance?: number };
 
 type Filter = 'all' | 'vip' | 'new' | 'lapsed' | 'birthday';
 type Sort = 'recent' | 'name' | 'spent' | 'visits';
@@ -26,6 +28,13 @@ const FILTERS: { value: Filter; label: string }[] = [
 ];
 
 export const isVip = (tags: string[]) => tags.some((t) => t.toLowerCase() === 'vip');
+
+/** A client's coin balance, shown only when they have some. */
+export function CoinChip({ balance }: { balance?: number | null }) {
+  const n = Number(balance ?? 0);
+  if (n <= 0) return null;
+  return <span className="coin-chip num" title={`${coinsText(n)} to spend here`}><Icon name="coins" size={12} />{fmtCoins(n)}<span className="sr-only"> coins</span></span>;
+}
 
 /** Client tags as badges; VIP stands out in marigold. */
 export function TagBadges({ tags }: { tags: string[] }) {
@@ -131,6 +140,7 @@ export function CustomersScreen({ clients, today, tz, truncated, initialQuery }:
                             <Avatar name={c.name} size="sm" color={isVip(c.tags) ? 'var(--marigold-700)' : undefined} />
                             <Link href={`/app/customers/${c.id}`} className="strong client-link" onClick={(e) => e.stopPropagation()}>{c.name}</Link>
                             <TagBadges tags={c.tags} />
+                            <CoinChip balance={c.coin_balance} />
                           </div>
                         </td>
                         <td className="num ink2 nowrap">{formatPhone(c.phone)}</td>
@@ -148,7 +158,7 @@ export function CustomersScreen({ clients, today, tz, truncated, initialQuery }:
                     <Link href={`/app/customers/${c.id}`} className="list-link">
                       <Avatar name={c.name} color={isVip(c.tags) ? 'var(--marigold-700)' : undefined} />
                       <div className="grow">
-                        <div className="row"><span className="strong truncate">{c.name}</span><TagBadges tags={c.tags.slice(0, 1)} /></div>
+                        <div className="row"><span className="strong truncate">{c.name}</span><TagBadges tags={c.tags.slice(0, 1)} /><CoinChip balance={c.coin_balance} /></div>
                         <div className="tiny muted num truncate">{formatPhone(c.phone)} · {filter === 'birthday' && c.birthday ? `Birthday ${bday(c.birthday)}` : relativeAgo(c.last_visit_at, today, tz)}</div>
                       </div>
                       <div className="right">

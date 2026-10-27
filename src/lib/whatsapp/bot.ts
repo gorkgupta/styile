@@ -7,6 +7,7 @@ import { cancelBooking, createBooking, findOrCreateCustomer, getAvailability, li
 import { markReadWithTyping, type OutgoingMessage } from './cloud-api';
 import { deliver, ensureConversation, getSalonWa } from './outbox';
 import { runEngine, type EngineContext, type Pending } from './engine';
+import type { CoinKind } from '@/lib/types';
 
 // Wires the assistant engine to Supabase, the booking service and WhatsApp.
 
@@ -153,6 +154,21 @@ async function handleMessage(phoneNumberId: string, profileName: string | null, 
       handoff: async (reason) => {
         await db.from('wa_conversations').update({ bot_paused: true, needs_attention: true }).eq('id', conv.id);
         await db.from('wa_messages').insert({ conversation_id: conv.id, salon_id: salon.id, direction: 'out', author: 'system', kind: 'note', body: `Assistant handed this chat to the team: ${reason}` });
+      },
+      // Coins are per salon: this client record belongs to the salon whose number was messaged.
+      coins: async () => {
+        const [{ data: c }, { data: tx }] = await Promise.all([
+          db.from('customers').select('coin_balance').eq('id', customer.id).eq('salon_id', salon.id).single(),
+          db.from('coin_transactions').select('kind, coins, balance_after, created_at, invoice:invoices(invoice_no)')
+            .eq('salon_id', salon.id).eq('customer_id', customer.id).order('created_at', { ascending: false }).limit(5),
+        ]);
+        type Row = { kind: CoinKind; coins: number; balance_after: number; created_at: string; invoice: { invoice_no: string } | null };
+        return {
+          balance: Number((c as { coin_balance: number } | null)?.coin_balance ?? 0),
+          recent: ((tx ?? []) as unknown as Row[]).map((t) => ({
+            kind: t.kind, coins: Number(t.coins), balance_after: Number(t.balance_after), created_at: t.created_at, bill: t.invoice?.invoice_no ?? null,
+          })),
+        };
       },
     }, inbound);
 

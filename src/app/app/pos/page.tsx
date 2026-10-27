@@ -7,7 +7,7 @@ import type { ClientLite } from '@/actions/appointments';
 
 export const metadata = { title: 'New bill' };
 
-const CLIENT_COLS = 'id, name, phone, visit_count, last_visit_at';
+const CLIENT_COLS = 'id, name, phone, visit_count, last_visit_at, coin_balance';
 
 export default async function PosPage({ searchParams }: { searchParams: Promise<{ appointment?: string; customer?: string }> }) {
   const ctx = await requirePermission('bill');

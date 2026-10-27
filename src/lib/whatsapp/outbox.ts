@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { env } from '@/lib/env';
 import { salonUrl } from '@/lib/tenant';
 import { money } from '@/lib/billing';
+import { fmtCoins } from '@/lib/coins';
 import { fmtDateShort, fmtTime, localDate } from '@/lib/time';
 import { sendWhatsApp, WhatsAppError, type OutgoingMessage } from './cloud-api';
 
@@ -14,6 +15,7 @@ export const TEMPLATES = {
   bookingConfirmation: 'booking_confirmation', // {{1}} name {{2}} salon {{3}} date & time {{4}} stylist {{5}} services
   reminder: 'appointment_reminder',            // {{1}} name {{2}} services {{3}} date & time {{4}} stylist {{5}} salon
   receipt: 'bill_receipt',                     // {{1}} name {{2}} salon {{3}} bill no {{4}} amount ; URL button param = invoice id
+  coinsUpdate: 'coins_update',                 // {{1}} name {{2}} coins added {{3}} salon {{4}} balance
 } as const;
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -146,6 +148,18 @@ export async function notifyInvoice(invoiceId: string) {
   return notifyCustomer(inv.salon_id, inv.customer.phone, inv.customer.id,
     `Thank you for visiting ${inv.salon.name}, ${first}! Your bill ${inv.invoice_no} for ${money(inv.total)}: ${link}`,
     { type: 'template', name: TEMPLATES.receipt, bodyParams: [first, inv.salon.name, inv.invoice_no, money(inv.total)], buttonUrlParam: inv.id });
+}
+
+/** Coins receipt after a sale at the desk: "₹5,000 received — 5,500 coins added at Glow Studio. Balance: 5,500 coins." */
+export async function notifyCoinsAdded(salonId: string, customerId: string, paid: number, coinsAdded: number, balance: number) {
+  const db = createAdminClient();
+  const { data } = await db.from('customers').select('id, name, phone, salon:salons(name)').eq('id', customerId).eq('salon_id', salonId).single();
+  const c = data as unknown as { id: string; name: string; phone: string; salon: { name: string } } | null;
+  if (!c) return { sent: false, reason: 'Client not found' };
+  const first = c.name.split(' ')[0];
+  return notifyCustomer(salonId, c.phone, c.id,
+    `${money(paid)} received — ${fmtCoins(coinsAdded)} coins added at ${c.salon.name}. Balance: ${fmtCoins(balance)} coins. Use them on your next bill here.`,
+    { type: 'template', name: TEMPLATES.coinsUpdate, bodyParams: [first, fmtCoins(coinsAdded), c.salon.name, fmtCoins(balance)] });
 }
 
 /** A person at the salon replies from the inbox. Throws a readable error if the 24h window is closed. */

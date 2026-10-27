@@ -7,6 +7,9 @@ const RULES = {
   editAppointments: ['owner', 'manager', 'receptionist', 'stylist'],
   bill: ['owner', 'manager', 'receptionist'],
   voidBill: ['owner', 'manager'],
+  sellCoins: ['owner', 'manager', 'receptionist'],
+  giveCoinBonus: ['owner', 'manager'],   // a bonus that isn't one of the salon's coin packs
+  adjustCoins: ['owner'],
   viewClients: ['owner', 'manager', 'receptionist', 'stylist'],
   deleteClients: ['owner', 'manager'],
   manageMenu: ['owner', 'manager'],

@@ -9,7 +9,7 @@ import { normalizePhone } from '@/lib/phone';
 import type { Slot } from '@/lib/availability';
 import type { ActionResult, ApptStatus } from '@/lib/types';
 
-export interface ClientLite { id: string; name: string; phone: string; visit_count: number; last_visit_at: string | null }
+export interface ClientLite { id: string; name: string; phone: string; visit_count: number; last_visit_at: string | null; coin_balance?: number }
 
 function refresh() { revalidatePath('/app', 'layout'); }
 
@@ -17,7 +17,7 @@ export async function searchClients(query: string): Promise<ActionResult<ClientL
   try {
     const { supabase, salon } = await getSalonContext();
     const q = query.trim();
-    let req = supabase.from('customers').select('id, name, phone, visit_count, last_visit_at').eq('salon_id', salon.id).limit(8);
+    let req = supabase.from('customers').select('id, name, phone, visit_count, last_visit_at, coin_balance').eq('salon_id', salon.id).limit(8);
     if (q) {
       const digits = q.replace(/\D/g, '');
       req = digits.length >= 3 ? req.like('phone', `%${digits}%`) : req.ilike('name', `%${q.replace(/[%_]/g, '')}%`);
@@ -34,10 +34,10 @@ export async function quickCreateClient(input: { name: string; phone: string }):
     const phone = normalizePhone(input.phone);
     if (!input.name.trim()) return { ok: false, error: 'Enter the client’s name.' };
     if (!phone) return { ok: false, error: 'Enter a valid 10-digit mobile number.' };
-    const existing = await supabase.from('customers').select('id, name, phone, visit_count, last_visit_at').eq('salon_id', salon.id).eq('phone', phone).maybeSingle();
+    const existing = await supabase.from('customers').select('id, name, phone, visit_count, last_visit_at, coin_balance').eq('salon_id', salon.id).eq('phone', phone).maybeSingle();
     if (existing.data) return { ok: true, data: existing.data as ClientLite, message: 'This number is already a client — selected them.' };
     const row = must(await supabase.from('customers').insert({ salon_id: salon.id, name: input.name.trim(), phone })
-      .select('id, name, phone, visit_count, last_visit_at').single());
+      .select('id, name, phone, visit_count, last_visit_at, coin_balance').single());
     return { ok: true, data: row as ClientLite };
   } catch (e) { return fail(e); }
 }

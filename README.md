@@ -26,10 +26,11 @@ The same rules are enforced twice: in the interface (`src/lib/permissions.ts`) a
 * **Clients** — history, notes (colour formulas, allergies), tags, visit and spend stats.
 * **Services, team, settings** — menu with durations and GST rates, staff hours/skills/commission, team logins and roles, opening hours, online booking rules.
 * **Reports** — revenue by day, stylist commissions, top services, payment mix, booking sources.
+* **Coins** — prepaid balance (1 coin = ₹1) sold at the desk for cash/UPI/card, with salon-defined bonus packs (pay ₹5,000 → 5,500 coins). Coins are spent as a payment method on normal GST bills, only at the salon that sold them; cancelling a bill refunds its coins. Owner adjustments with a required note, a full ledger, coins in reports, the client portal and the WhatsApp assistant. Selling coins gives a *coins receipt*, not a tax invoice — GST is charged when coins are used (confirm the GST treatment with your CA). No expiry yet.
 * **Online booking page** per salon and a **client portal**.
 * **WhatsApp assistant** — understands free text in English and Indian languages, checks real availability, books/reschedules/cancels with a Confirm button, answers questions, hands over to a person; staff inbox to take over; automatic confirmations, 24h/2h reminders and bills.
 
-Planned next: memberships/packages/wallet, inventory, attendance & payroll, WhatsApp campaigns, multi-branch, in-app Embedded Signup for WhatsApp, subscription billing via Razorpay, native apps.
+Planned next: memberships/packages, coin expiry and online coin top-ups (Razorpay), inventory, attendance & payroll, WhatsApp campaigns, multi-branch, in-app Embedded Signup for WhatsApp, subscription billing via Razorpay, native apps.
 
 ## Architecture
 

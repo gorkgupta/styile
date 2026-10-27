@@ -7,10 +7,10 @@ import { METHOD_LABEL } from '@/lib/types';
 
 export const PAY_METHODS: PayMethod[] = ['cash', 'upi', 'card', 'wallet', 'other'];
 
-export const METHOD_ICON: Record<PayMethod, IconName> = { cash: 'cash', upi: 'upi', card: 'card', wallet: 'wallet', other: 'more' };
+export const METHOD_ICON: Record<PayMethod, IconName> = { cash: 'cash', upi: 'upi', card: 'card', wallet: 'coins', other: 'more' };
 
 export const REF_PLACEHOLDER: Record<PayMethod, string> = {
-  cash: 'Note (optional)', upi: 'UPI ref no. (optional)', card: 'Last 4 digits (optional)', wallet: 'Wallet name (optional)', other: 'Details (optional)',
+  cash: 'Note (optional)', upi: 'UPI ref no. (optional)', card: 'Last 4 digits (optional)', wallet: 'Note (optional)', other: 'Details (optional)',
 };
 
 export const INVOICE_STATUS_LABEL: Record<InvoiceStatus, string> = { paid: 'Paid', partial: 'Part paid', unpaid: 'Unpaid', void: 'Cancelled' };

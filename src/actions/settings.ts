@@ -3,9 +3,10 @@ import { revalidatePath } from 'next/cache';
 import { getSalonContext } from '@/lib/context';
 import { can } from '@/lib/permissions';
 import { fail, must } from '@/lib/actions';
+import { checkCoinPacks } from '@/lib/coins';
 import { cleanHours } from '@/lib/hours';
 import { normalizePhone } from '@/lib/phone';
-import type { ActionResult, Hours } from '@/lib/types';
+import type { ActionResult, CoinPack, Hours } from '@/lib/types';
 
 // Salon settings. Only the owner can change these (RLS: salons_owner_update). Subscription, booking link
 // and WhatsApp number fields are guarded by a trigger and managed by the platform admin, so they are
@@ -122,5 +123,20 @@ export async function updateAssistant(input: AssistantInput): Promise<ActionResu
     must(await ctx.supabase.from('salons').update({ wa_bot_enabled: !!input.botEnabled, wa_bot_instructions: instructions || null }).eq('id', ctx.salon.id));
     refresh();
     return { ok: true, message: input.botEnabled ? 'Assistant settings saved' : 'Assistant turned off. Chats will wait for your team.' };
+  } catch (e) { return fail(e); }
+}
+
+export interface CoinSettingsInput { enabled: boolean; packs: CoinPack[] }
+
+/** Turn coin sales on/off and set the coin packs the front desk can sell. */
+export async function updateCoinSettings(input: CoinSettingsInput): Promise<ActionResult> {
+  try {
+    const ctx = await ownerContext();
+    if (!ctx) return { ok: false, error: NOT_ALLOWED };
+    const packs = checkCoinPacks(input.packs);
+    if (!packs.ok) return { ok: false, error: packs.error };
+    must(await ctx.supabase.from('salons').update({ coins_enabled: !!input.enabled, coin_packs: packs.packs }).eq('id', ctx.salon.id));
+    refresh();
+    return { ok: true, message: input.enabled ? 'Coin settings saved' : 'Coin sales turned off. Clients can still use the coins they have.' };
   } catch (e) { return fail(e); }
 }

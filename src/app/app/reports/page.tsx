@@ -9,6 +9,7 @@ export const metadata = { title: 'Reports' };
 const EMPTY: SalonReport = {
   revenue: 0, collected: 0, tax: 0, bills: 0, avg_bill: 0, new_clients: 0,
   appointments: {}, by_source: {}, by_day: [], by_staff: [], by_service: [], by_method: {},
+  coins_sold: 0, coins_bonus: 0, coins_redeemed: 0, coins_outstanding: 0,
 };
 
 export default async function ReportsPage({ searchParams }: { searchParams: Promise<{ range?: string; from?: string; to?: string }> }) {

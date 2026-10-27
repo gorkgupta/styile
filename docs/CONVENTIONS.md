@@ -5,7 +5,7 @@ Styile is a multi-tenant salon management SaaS for India: Next.js 15 (App Router
 ## Layout
 
 ```
-supabase/migrations/   schema (0001), row level security (0002), RPC functions (0003)
+supabase/migrations/   schema (0001), row level security (0002), RPC functions (0003), salon addresses (0004), coins (0005)
 src/app/               routes. /app/* = salon dashboard, /s/[slug] = salon site (booking page; /s/[slug]/me = client portal), /admin = platform console.
                        In production the middleware serves /s/<slug>/* at <slug>.styile.com/* (see src/lib/tenant.ts); link with
                        salonUrl(slug, path) from '@/lib/tenant', or with the `base` prop inside salon-site pages — never hardcode /s/ or /me.
@@ -14,7 +14,7 @@ src/components/ui/     primitives: ui.tsx (Button, TextField, SelectField, TextA
                        Panel, Stat, Empty, Notice, Segmented, Sheet, Dialog, ToastProvider/useToast, SubmitButton), icons.tsx (<Icon name=…/>)
 src/components/app/    dashboard screens. shell.tsx has AppShell + <Topbar title subtitle actions back/>
 src/lib/               types.ts (row types + labels), time.ts (time zones/formatting), billing.ts (computeBill, money, amountInWords),
-                       availability.ts (slot engine), booking.ts (server booking service), phone.ts, permissions.ts (can(role, perm)),
+                       availability.ts (slot engine), booking.ts (server booking service), coins.ts (coin packs/formatting), phone.ts, permissions.ts (can(role, perm)),
                        context.ts (getSalonContext/requirePermission), queries.ts, actions.ts (fail/must/errorMessage),
                        supabase/{server,client,admin}.ts, whatsapp/{cloud-api,outbox}.ts, env.ts
 preview/               static preview harness with sample data (see below)
