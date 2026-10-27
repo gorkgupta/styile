@@ -1,10 +1,11 @@
 import 'server-only';
 import { cache } from 'react';
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { createClient } from './supabase/server';
 import { can, type Permission } from './permissions';
 import type { Branch, MemberRole, Salon } from './types';
+import { mainUrl, PATH_HEADER, rootDomain, SALON_HEADER, salonUrl } from './tenant';
 
 export const ACTIVE_SALON_COOKIE = 'styile_salon';
 
@@ -15,7 +16,7 @@ export interface SalonContext {
   branch: Branch;
   role: MemberRole;
   staffId: string | null;
-  memberships: { salon_id: string; name: string; role: MemberRole }[];
+  memberships: { salon_id: string; name: string; slug: string; role: MemberRole }[];
   isPlatformAdmin: boolean;
 }
 
@@ -32,16 +33,28 @@ export const getSalonContext = cache(async (): Promise<SalonContext> => {
   const { supabase, user } = await requireUser();
 
   const [{ data: memberships }, { data: profile }] = await Promise.all([
-    supabase.from('salon_members').select('salon_id, role, staff_id, salons(name)').eq('user_id', user.id),
+    supabase.from('salon_members').select('salon_id, role, staff_id, salons(name, slug)').eq('user_id', user.id),
     supabase.from('profiles').select('full_name, is_platform_admin').eq('id', user.id).maybeSingle(),
   ]);
 
   if (!memberships?.length) {
-    redirect(profile?.is_platform_admin ? '/admin' : '/onboarding');
+    redirect(mainUrl(profile?.is_platform_admin ? '/admin' : '/onboarding'));
   }
+  const slugOf = (m: { salons: unknown }) => (m.salons as { slug?: string } | null)?.slug ?? '';
 
-  const wanted = (await cookies()).get(ACTIVE_SALON_COOKIE)?.value;
-  const active = memberships.find((m) => m.salon_id === wanted) ?? memberships[0];
+  // On a salon's own address (glowstudio.styile.com/app) the app is locked to that salon.
+  const h = await headers();
+  const hostSlug = h.get(SALON_HEADER);
+  let active;
+  if (hostSlug) {
+    active = memberships.find((m) => slugOf(m) === hostSlug);
+    if (!active) redirect(mainUrl(`/app?not_member=${encodeURIComponent(hostSlug)}`));
+  } else {
+    const wanted = (await cookies()).get(ACTIVE_SALON_COOKIE)?.value;
+    active = memberships.find((m) => m.salon_id === wanted) ?? memberships[0];
+    // With subdomains on, staff work on their salon's own address.
+    if (rootDomain() && slugOf(active)) redirect(salonUrl(slugOf(active), h.get(PATH_HEADER) || '/app'));
+  }
 
   const [{ data: salon }, { data: branch }] = await Promise.all([
     supabase.from('salons').select('*').eq('id', active.salon_id).single(),
@@ -61,6 +74,7 @@ export const getSalonContext = cache(async (): Promise<SalonContext> => {
       role: m.role as MemberRole,
       // supabase-js types embedded relations loosely; the FK makes this a single object
       name: (m.salons as unknown as { name: string } | null)?.name ?? 'Salon',
+      slug: slugOf(m),
     })),
     isPlatformAdmin: !!profile?.is_platform_admin,
   };

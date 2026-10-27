@@ -11,7 +11,7 @@ import { usePhoneOtp } from '@/components/public/phone-otp';
 import { PortalHeader } from './portal';
 
 /** Client sign-in with a WhatsApp code. After verifying, links this number's client records across salons. */
-export function PortalLogin({ next }: { next?: string }) {
+export function PortalLogin({ next, base, salonName }: { next?: string; base: string; salonName: string }) {
   const otp = usePhoneOtp();
   const router = useRouter();
   const [finishing, setFinishing] = useState(false);
@@ -25,13 +25,13 @@ export function PortalLogin({ next }: { next?: string }) {
     setFinishing(true);
     const r = await claimMyProfiles();
     if (!r.ok) { setFinishing(false); setError(r.error); return; }
-    router.replace(safeNextPath(next) ?? '/me');
+    router.replace(safeNextPath(next) ?? `${base}/me`);
     router.refresh();
   }
 
   return (
     <div className="pt">
-      <PortalHeader />
+      <PortalHeader base={base} salonName={salonName} />
       <main className="pt-wrap pt-login">
         <div className="pt-login-card">
           <div className="pt-login-icon"><Icon name="whatsapp" size={26} /></div>

@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
+import { mainUrl } from '@/lib/tenant';
 import { Button, Notice, TextField, cx } from '@/components/ui/ui';
 import { Icon } from '@/components/ui/icons';
 import { bookOnline, getPublicSlots, type BookOnlineResult } from '@/actions/public';
@@ -26,6 +27,8 @@ export interface BookingPageProps {
   today: string;
   /** Present when the visitor is already signed in with a verified phone. */
   me: { phone: string; name: string } | null;
+  /** Link prefix of this salon's site: "" on its own subdomain, "/s/<slug>" otherwise. */
+  base: string;
 }
 
 type Step = 1 | 2 | 3 | 4 | 5;
@@ -372,7 +375,7 @@ export function BookingFlow(p: BookingPageProps) {
                 location: [p.salon.name, addr].filter(Boolean).join(', '),
                 description: `With ${result.stylist}. Pay at the salon. To change or cancel, reply on WhatsApp or visit your bookings.`,
               })}>Add to calendar</Button>
-              <Link href="/me" className="btn btn-ghost btn-block">See all my bookings</Link>
+              <Link href={`${p.base}/me`} className="btn btn-ghost btn-block">See all my bookings</Link>
             </div>
             <Button variant="ghost" size="sm" onClick={() => { setPicked([]); setSlot(null); setResult(null); setStaffId(null); go(1); }}>Book something else</Button>
           </section>
@@ -388,7 +391,7 @@ export function BookingFlow(p: BookingPageProps) {
         </div>
       )}
       <footer className="bk-wrap bk-foot tiny muted">
-        Online booking by <Link href="/">Styile</Link> · <Link href="/me">My bookings</Link>
+        Online booking by <a href={mainUrl('/') || '/'}>Styile</a> · <Link href={`${p.base}/me`}>My bookings</Link>
       </footer>
     </div>
   );

@@ -47,7 +47,7 @@ export async function claimMyProfiles(): Promise<ActionResult<{ linked: number }
     if (!auth.user) return { ok: false, error: 'Log in with your mobile number first.' };
     const { data, error } = await supabase.rpc('claim_customer_profiles');
     if (error) throw error;
-    revalidatePath('/me', 'layout');
+    revalidatePath('/s/[slug]/me', 'page');
     return { ok: true, data: { linked: Number(data ?? 0) } };
   } catch (e) { return failPortal(e); }
 }
@@ -57,7 +57,7 @@ export async function cancelMyBooking(appointmentId: string, reason: string): Pr
     const appt = await myAppointment(appointmentId);
     const why = String(reason ?? '').trim().slice(0, 200);
     await cancelBooking(appt.db, appt.salonId, appt.customerId, appt.id, why ? `Client cancelled online: ${why}` : 'Client cancelled online');
-    revalidatePath('/me');
+    revalidatePath('/s/[slug]/me', 'page');
     return { ok: true, message: 'Booking cancelled' };
   } catch (e) { return failPortal(e); }
 }
@@ -81,7 +81,7 @@ export async function rescheduleMyBooking(appointmentId: string, newStart: strin
     const appt = await myAppointment(appointmentId);
     const catalog = await loadCatalog(appt.db, appt.salonId);
     const { appointment, stylist } = await rescheduleBooking(appt.db, catalog, appt.customerId, appt.id, newStart);
-    revalidatePath('/me');
+    revalidatePath('/s/[slug]/me', 'page');
     return { ok: true, data: { when: fmtDateTime(appointment.start_at, catalog.salon.timezone), stylist: stylist.name }, message: 'Booking moved' };
   } catch (e) { return failPortal(e); }
 }

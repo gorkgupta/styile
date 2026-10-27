@@ -6,6 +6,7 @@ import { Icon, type IconName } from '@/components/ui/icons';
 import { createSalon, signIn, signUp } from '@/actions/auth';
 import type { ActionResult } from '@/lib/types';
 import { TRIAL_DAYS } from '@/lib/plans';
+import { isReservedSlug, rootDomain } from '@/lib/tenant';
 
 /** Calm split layout for staff sign-in screens: form on the left, a short reassurance panel on the right (hidden on phones). */
 export function AuthLayout({ children, aside }: { children: ReactNode; aside: ReactNode }) {
@@ -40,7 +41,7 @@ function FormError({ state }: { state: ActionResult | null }) {
   return state.message ? <Notice tone="success">{state.message}</Notice> : null;
 }
 
-export function LoginForm({ next, notice }: { next?: string; notice?: string }) {
+export function LoginForm({ next, notice, salonName }: { next?: string; notice?: string; salonName?: string }) {
   const [state, action] = useActionState(signIn, null);
   return (
     <AuthLayout aside={
@@ -52,7 +53,7 @@ export function LoginForm({ next, notice }: { next?: string; notice?: string }) 
     }>
       <div className="stack-sm">
         <h1>Log in to your salon</h1>
-        <p className="muted">For salon owners and staff. Booked an appointment as a client? <Link href="/me/login">See your bookings</Link>.</p>
+        <p className="muted">{salonName ? <>Staff login for <span className="strong ink2">{salonName}</span>. Clients, <Link href="/me/login">see your bookings here</Link>.</> : 'For salon owners and staff.'}</p>
       </div>
       {notice && <Notice>{notice}</Notice>}
       <form action={action} className="stack">
@@ -116,13 +117,14 @@ export function OnboardingForm({ ownerName, appHost }: { ownerName: string; appH
   const [host, setHost] = useState(appHost);
   useEffect(() => { if (!appHost && typeof window !== 'undefined') setHost(window.location.host); }, [appHost]);
   const shownSlug = slugEdited ? slug : slugify(name);
+  const root = rootDomain();
 
   return (
     <AuthLayout aside={
       <AsidePoints title="What happens next" points={[
         { icon: 'scissors', text: 'Your dashboard opens with your salon’s calendar. Add or edit services any time.' },
         { icon: 'users', text: 'Add your stylists so clients can choose who they book with.' },
-        { icon: 'link', text: 'Share your booking link on Instagram and Google, and connect WhatsApp when you’re ready.' },
+        { icon: 'link', text: 'Your salon gets its own address for Instagram and Google, and clients see their bookings there.' },
       ]} />
     }>
       <div className="stack-sm">
@@ -132,13 +134,24 @@ export function OnboardingForm({ ownerName, appHost }: { ownerName: string; appH
       <form action={action} className="stack">
         <TextField label="Salon name" name="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Glow Studio" required autoFocus />
         <div className="field">
-          <label htmlFor="ob-slug">Booking link</label>
-          <div className="prefix-input">
-            <span><span className="hide-mobile">{host || 'styile.com'}</span>/s/</span>
-            <input id="ob-slug" className="input" name="slug" value={shownSlug} required pattern="[a-z0-9][a-z0-9\-]{1,38}[a-z0-9]"
-              onChange={(e) => { setSlugEdited(true); setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '')); }} placeholder="glow-studio" />
-          </div>
-          <span className="hint">Clients book at <span className="strong ink2">{host || 'styile.com'}/s/{shownSlug || 'your-salon'}</span>. Letters, numbers and dashes.</span>
+          <label htmlFor="ob-slug">Your salon’s address</label>
+          {root ? (
+            <div className="prefix-input suffix-input">
+              <input id="ob-slug" className="input" name="slug" value={shownSlug} required pattern="[a-z0-9][a-z0-9\-]{1,38}[a-z0-9]"
+                onChange={(e) => { setSlugEdited(true); setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '')); }} placeholder="glowstudio" />
+              <span>.{root}</span>
+            </div>
+          ) : (
+            <div className="prefix-input">
+              <span><span className="hide-mobile">{host || 'styile.com'}</span>/s/</span>
+              <input id="ob-slug" className="input" name="slug" value={shownSlug} required pattern="[a-z0-9][a-z0-9\-]{1,38}[a-z0-9]"
+                onChange={(e) => { setSlugEdited(true); setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '')); }} placeholder="glowstudio" />
+            </div>
+          )}
+          <span className="hint">
+            {shownSlug && isReservedSlug(shownSlug) ? <span style={{ color: 'var(--danger)' }}>“{shownSlug}” is reserved. Try another.</span>
+              : <>Clients book and see their bookings at <span className="strong ink2">{root ? `${shownSlug || 'yoursalon'}.${root}` : `${host || 'styile.com'}/s/${shownSlug || 'yoursalon'}`}</span>. Letters, numbers and dashes.</>}
+          </span>
         </div>
         <div className="grid-2">
           <div className="field">

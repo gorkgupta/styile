@@ -68,12 +68,13 @@ declare module 'next' {
 declare module 'next/server' {
   export class NextRequest extends Request {
     nextUrl: URL & { clone(): URL & { pathname: string } };
-    cookies: { get(n: string): { name: string; value: string } | undefined; getAll(): { name: string; value: string }[]; set(n: string, v: string): void };
+    cookies: { get(n: string): { name: string; value: string } | undefined; getAll(): { name: string; value: string }[]; set(n: string, v: string): void; toString(): string };
   }
   export class NextResponse extends Response {
     static json(body: any, init?: ResponseInit): NextResponse;
     static next(init?: any): NextResponse;
     static redirect(url: string | URL, status?: number): NextResponse;
+    static rewrite(url: string | URL, init?: any): NextResponse;
     cookies: { set(n: string, v: string, o?: any): void };
   }
   export function after(task: Promise<any> | (() => any)): void;
@@ -114,8 +115,8 @@ declare module '@supabase/supabase-js' {
 }
 declare module '@supabase/ssr' {
   import type { SupabaseClient } from '@supabase/supabase-js';
-  export function createServerClient(url: string, key: string, opts: { cookies: { getAll(): any[]; setAll(list: { name: string; value: string; options?: any }[]): void } }): SupabaseClient;
-  export function createBrowserClient(url: string, key: string): SupabaseClient;
+  export function createServerClient(url: string, key: string, opts: { cookieOptions?: Record<string, any>; cookies: { getAll(): any[]; setAll(list: { name: string; value: string; options?: any }[]): void } }): SupabaseClient;
+  export function createBrowserClient(url: string, key: string, opts?: { cookieOptions?: Record<string, any> }): SupabaseClient;
 }
 declare module '@opennextjs/cloudflare' { export function defineCloudflareConfig(c: any): any; export function initOpenNextCloudflareForDev(): void; export function getCloudflareContext(): any; }
 

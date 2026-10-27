@@ -52,7 +52,7 @@ const result = await esbuild.build({
   jsx: 'automatic',
   target: 'es2022',
   nodePaths: [nm],
-  define: { 'process.env.NODE_ENV': process.env.PREVIEW_DEV ? '"development"' : '"production"', 'process.env.NEXT_PUBLIC_SUPABASE_URL': '""', 'process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY': '""' },
+  define: { 'process.env.NODE_ENV': process.env.PREVIEW_DEV ? '"development"' : '"production"', 'process.env.NEXT_PUBLIC_SUPABASE_URL': '""', 'process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY': '""', 'process.env.NEXT_PUBLIC_ROOT_DOMAIN': '"styile.com"', 'process.env.NEXT_PUBLIC_APP_URL': '"https://styile.com"', 'process.env.NEXT_PUBLIC_SUPPORT_EMAIL': '"support@styile.com"' },
   plugins: [previewPlugin],
   logLevel: 'warning',
   metafile: false,

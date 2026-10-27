@@ -6,6 +6,12 @@
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
   "observability": { "enabled": true },
+  // styile.com is the main site; every salon is served on its own subdomain (glowstudio.styile.com).
+  // Needs the zone on Cloudflare plus a proxied wildcard DNS record "*" (see docs/DEPLOY.md).
+  "routes": [
+    { "pattern": "styile.com", "custom_domain": true },
+    { "pattern": "*.styile.com/*", "zone_name": "styile.com" }
+  ],
   // Public, non-secret settings. Secrets are set with `npx wrangler secret put NAME` (see docs/DEPLOY.md).
   "vars": {
     "NEXT_PUBLIC_APP_NAME": "Styile",

@@ -6,7 +6,9 @@ Styile is a multi-tenant salon management SaaS for India: Next.js 15 (App Router
 
 ```
 supabase/migrations/   schema (0001), row level security (0002), RPC functions (0003)
-src/app/               routes. /app/* = salon dashboard, /s/[slug] = public booking, /me = client portal, /admin = platform console
+src/app/               routes. /app/* = salon dashboard, /s/[slug] = salon site (booking page; /s/[slug]/me = client portal), /admin = platform console.
+                       In production the middleware serves /s/<slug>/* at <slug>.styile.com/* (see src/lib/tenant.ts); link with
+                       salonUrl(slug, path) from '@/lib/tenant', or with the `base` prop inside salon-site pages — never hardcode /s/ or /me.
 src/actions/           'use server' modules — every mutation goes through one of these
 src/components/ui/     primitives: ui.tsx (Button, TextField, SelectField, TextArea, Switch, SearchInput, Badge, StatusBadge, Avatar,
                        Panel, Stat, Empty, Notice, Segmented, Sheet, Dialog, ToastProvider/useToast, SubmitButton), icons.tsx (<Icon name=…/>)

@@ -2,11 +2,14 @@ import 'server-only';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { env } from '@/lib/env';
+import { cookieDomain } from '@/lib/tenant';
 
 /** Supabase client acting as the signed-in user (RLS applies). Use in server components and actions. */
 export async function createClient() {
   const cookieStore = await cookies();
   return createServerClient(env.supabaseUrl(), env.supabaseAnonKey(), {
+    // One login for styile.com and every salon's subdomain.
+    cookieOptions: { domain: cookieDomain() },
     cookies: {
       getAll: () => cookieStore.getAll(),
       setAll: (list) => {

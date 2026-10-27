@@ -1,6 +1,7 @@
 import 'server-only';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { env } from '@/lib/env';
+import { salonUrl } from '@/lib/tenant';
 import { callClaude } from '@/lib/anthropic';
 import { cancelBooking, createBooking, findOrCreateCustomer, getAvailability, listUpcoming, loadCatalog, rescheduleBooking } from '@/lib/booking';
 import { markReadWithTyping, type OutgoingMessage } from './cloud-api';
@@ -109,7 +110,7 @@ async function handleMessage(phoneNumberId: string, profileName: string | null, 
     const ctx: EngineContext = {
       salon: {
         name: salon.name, address: salon.address, phone: salon.phone, tz: salon.timezone, hours: catalog.branch.business_hours,
-        instructions: salon.wa_bot_instructions, windowDays: salon.booking_window_days, bookingUrl: `${env.appUrl()}/s/${salon.slug}`,
+        instructions: salon.wa_bot_instructions, windowDays: salon.booking_window_days, bookingUrl: salonUrl(salon.slug) || `${env.appUrl()}/s/${salon.slug}`,
       },
       services: catalog.services.map((s) => ({
         id: s.id, name: s.name, category: s.category_id ? catMap.get(s.category_id) ?? null : null,

@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { ACTIVE_SALON_COOKIE } from '@/lib/context';
+import { isReservedSlug, rootDomain, salonUrl, SLUG_RE } from '@/lib/tenant';
 import { errorMessage } from '@/lib/actions';
 import { normalizePhone } from '@/lib/phone';
 import { safeNextPath } from '@/lib/safe-next';
@@ -47,6 +48,12 @@ export async function signOut() {
 export async function switchSalon(form: FormData) {
   const id = String(form.get('salon_id') || '');
   (await cookies()).set(ACTIVE_SALON_COOKIE, id, { path: '/', httpOnly: true, sameSite: 'lax', maxAge: 60 * 60 * 24 * 365 });
+  if (rootDomain()) {
+    // Each salon has its own address; RLS only returns salons this user belongs to.
+    const supabase = await createClient();
+    const { data } = await supabase.from('salons').select('slug').eq('id', id).maybeSingle();
+    if (data?.slug) redirect(salonUrl(data.slug, '/app'));
+  }
   redirect('/app');
 }
 
@@ -57,7 +64,8 @@ export async function createSalon(_: ActionResult | null, form: FormData): Promi
   const phoneRaw = String(form.get('phone') || '').trim();
   const phone = phoneRaw ? normalizePhone(phoneRaw) : null;
   if (name.length < 2) return { ok: false, error: 'Enter your salon name.' };
-  if (!/^[a-z0-9]([a-z0-9-]{1,38}[a-z0-9])$/.test(slug)) return { ok: false, error: 'Booking link can use lowercase letters, numbers and dashes (3–40 characters).' };
+  if (!SLUG_RE.test(slug)) return { ok: false, error: 'Your salon address can use lowercase letters, numbers and dashes (3–40 characters).' };
+  if (isReservedSlug(slug)) return { ok: false, error: `“${slug}” is reserved. Try your salon’s name, for example ${slug}-salon.` };
   if (phoneRaw && !phone) return { ok: false, error: 'Enter a valid 10-digit mobile number.' };
   const { data, error } = await supabase.rpc('create_salon', {
     p_name: name, p_slug: slug, p_phone: phone, p_city: String(form.get('city') || '').trim() || null,
@@ -65,5 +73,6 @@ export async function createSalon(_: ActionResult | null, form: FormData): Promi
   });
   if (error) return { ok: false, error: errorMessage(error) };
   (await cookies()).set(ACTIVE_SALON_COOKIE, (data as { id: string }).id, { path: '/', httpOnly: true, sameSite: 'lax', maxAge: 60 * 60 * 24 * 365 });
-  redirect('/app?welcome=1');
+  // Straight to the salon's own address (the login cookie is shared across *.styile.com).
+  redirect(rootDomain() ? salonUrl(slug, '/app?welcome=1') : '/app?welcome=1');
 }

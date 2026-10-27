@@ -1052,3 +1052,7 @@ img, svg { display: block; }
   .bubble { max-width: 86%; }
   .composer { padding: 8px 12px; }
 }
+
+/* salon addresses (onboarding: "glowstudio" + ".styile.com") */
+.suffix-input > .input { border-radius: var(--radius) 0 0 var(--radius); }
+.suffix-input > span { border-radius: 0 var(--radius) var(--radius) 0; border-right: 1px solid var(--line-strong); border-left: 0; white-space: nowrap; }

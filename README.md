@@ -4,14 +4,16 @@ Styile runs a salon's day — calendar, walk-in queue, GST billing, clients, tea
 
 ## Who logs in
 
+Every salon gets its own address, `<salon>.styile.com`. One login (email for staff, phone for clients) works on every address, but each salon's site only shows that salon.
+
 | Login | Where | What they can do |
 |---|---|---|
-| **Owner** | `/login` → `/app` | Everything for their salon(s): settings, team access, reports, billing |
-| **Manager** | `/login` → `/app` | Day-to-day running, menu, team schedules, reports, cancel bills |
-| **Front desk** (admin) | `/login` → `/app` | Calendar, walk-ins, clients, billing, WhatsApp inbox |
-| **Stylist** | `/login` → `/app` | Their own calendar column, clients |
-| **Client** | `/me/login` (code on WhatsApp) → `/me` | Upcoming visits, change/cancel, bills; book at `/s/<salon>` |
-| **Platform admin** (you) | `/admin` | All salons, plans and status, connect WhatsApp numbers |
+| **Owner** | `glowstudio.styile.com/app` | Everything for their salon(s): settings, team access, reports, billing |
+| **Manager** | `glowstudio.styile.com/app` | Day-to-day running, menu, team schedules, reports, cancel bills |
+| **Front desk** (admin) | `glowstudio.styile.com/app` | Calendar, walk-ins, clients, billing, WhatsApp inbox |
+| **Stylist** | `glowstudio.styile.com/app` | Their own calendar column, clients |
+| **Client** | `glowstudio.styile.com/me` (code on WhatsApp) | Book, see upcoming visits, change/cancel, bills — at that salon only |
+| **Platform admin** (you) | `styile.com/admin` | All salons, plans and status, connect WhatsApp numbers |
 
 The same rules are enforced twice: in the interface (`src/lib/permissions.ts`) and in the database with row-level security (`supabase/migrations/0002_security.sql`), so one salon can never read another's data even if the app had a bug.
 
