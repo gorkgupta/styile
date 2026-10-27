@@ -8,6 +8,7 @@ import { can, type Permission } from '@/lib/permissions';
 import type { MemberRole } from '@/lib/types';
 import { ROLE_LABEL } from '@/lib/types';
 import { signOut, switchSalon } from '@/actions/auth';
+import { salonUrl } from '@/lib/tenant';
 
 export interface ShellProps {
   salon: { id: string; name: string; slug: string; plan_status: string };
@@ -83,7 +84,7 @@ export function AppShell(props: ShellProps) {
         )}
         <div className="sidebar-foot stack-sm">
           {props.isPlatformAdmin && <Link className="btn btn-ghost btn-sm" href="/admin"><Icon name="shield" size={16} />Platform admin</Link>}
-          <Link className="btn btn-ghost btn-sm" href={`/s/${props.salon.slug}`} target="_blank"><Icon name="external" size={16} />Booking page</Link>
+          <Link className="btn btn-ghost btn-sm" href={salonUrl(props.salon.slug) || `/s/${props.salon.slug}`} target="_blank"><Icon name="external" size={16} />Booking page</Link>
           <div className="row" style={{ padding: '8px 8px 0' }}>
             <Avatar name={props.user.name} size="sm" color="#6B3FA0" />
             <span className="small truncate grow">{props.user.name}</span>

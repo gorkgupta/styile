@@ -7,6 +7,7 @@ import { Topbar } from './shell';
 import { AppointmentSheet, NewAppointmentSheet, type MenuProps } from './appointment-sheets';
 import { useLiveRefresh } from './live';
 import { money } from '@/lib/billing';
+import { rootDomain, salonUrl } from '@/lib/tenant';
 import { fmtDateLong, fmtTime } from '@/lib/time';
 import type { AppointmentFull } from '@/lib/types';
 
@@ -51,7 +52,7 @@ export function TodayView(p: TodayProps) {
     };
   }, [p.appointments]);
 
-  const bookingUrl = typeof window !== 'undefined' ? `${window.location.origin}/s/${p.salon.slug}` : `/s/${p.salon.slug}`;
+  const bookingUrl = rootDomain() ? salonUrl(p.salon.slug) : typeof window !== 'undefined' ? `${window.location.origin}/s/${p.salon.slug}` : `/s/${p.salon.slug}`;
   const setupSteps = [
     { done: p.teamSize > 1, label: 'Add your stylists', href: '/app/staff' },
     { done: !!p.salon.gstin, label: 'Add GST details for invoices', href: '/app/settings' },

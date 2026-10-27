@@ -1,4 +1,5 @@
 'use client';
+import { rootDomain, salonAddress, salonUrl } from '@/lib/tenant';
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -122,7 +123,7 @@ export function AdminConsole(p: AdminConsoleProps) {
                         onKeyDown={(e) => { if (e.key === 'Enter') setOpenId(s.id); }}>
                         <td>
                           <div className="strong">{s.name}</div>
-                          <div className="tiny muted">/s/{s.slug}{s.city ? ` · ${s.city}` : ''}</div>
+                          <div className="tiny muted">{salonAddress(s.slug)}{s.city ? ` · ${s.city}` : ''}</div>
                         </td>
                         <td>
                           <div className="small truncate" style={{ maxWidth: 220 }}>{s.ownerEmail ?? '—'}</div>
@@ -218,7 +219,7 @@ function SalonSheet({ salon, nowIso, onClose }: { salon: AdminSalonRow | null; n
       <Sheet open={!!salon} onClose={onClose} width={560} title={
         <div style={{ minWidth: 0 }}>
           <h2 className="truncate">{salon.name}</h2>
-          <div className="small muted truncate">/s/{salon.slug}{salon.ownerEmail ? ` · ${salon.ownerEmail}` : ''}</div>
+          <div className="small muted truncate">{salonAddress(salon.slug)}{salon.ownerEmail ? ` · ${salon.ownerEmail}` : ''}</div>
         </div>
       }>
         <div className="stack-lg">
@@ -229,7 +230,7 @@ function SalonSheet({ salon, nowIso, onClose }: { salon: AdminSalonRow | null; n
             <div><span className="tiny muted">Joined</span><span className="strong">{fmtDateShort(localDate(new Date(salon.createdAt), TZ))}</span></div>
           </div>
           <div className="row-wrap">
-            <a className="btn btn-secondary btn-sm" href={`/s/${salon.slug}`} target="_blank" rel="noreferrer"><Icon name="external" size={16} />Open booking page</a>
+            <a className="btn btn-secondary btn-sm" href={rootDomain() ? salonUrl(salon.slug) : `/s/${salon.slug}`} target="_blank" rel="noreferrer"><Icon name="external" size={16} />Open salon site</a>
             {!salon.bookingEnabled && <Badge tone="marigold">Online booking switched off by salon</Badge>}
           </div>
 

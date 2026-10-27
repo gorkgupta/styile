@@ -140,6 +140,8 @@ select t.fails(format($q$insert into public.staff_services (staff_id, service_id
 select t.fails(format($q$update public.salon_members set staff_id = %L where salon_id = %L$q$, :'priya', :'salon_b'), 'membership cannot link another salon''s stylist');
 select t.fails('select public.create_salon(''Bad'', ''glow-studio'')', 'slug must be unique');
 select t.fails('select public.create_salon(''Bad'', ''Bad Slug!'')', 'slug format enforced');
+select t.fails('select public.create_salon(''Admin'', ''admin'')', 'reserved addresses cannot be used');
+select t.fails('select public.create_salon(''WWW'', ''www'')', 'www is reserved');
 
 -- ===== Stylist role =====
 select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-00000000000c","role":"authenticated"}', false);

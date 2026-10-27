@@ -1,18 +1,35 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { updateSession } from '@/lib/supabase/middleware';
+import { PATH_HEADER, routeRequest, SALON_HEADER } from '@/lib/tenant';
 
 // Signed-in areas. Role checks (owner vs stylist, platform admin) happen in each layout on the server.
-const PROTECTED = ['/app', '/admin', '/me', '/onboarding'];
+// Client pages (/me) check sign-in themselves so they can send people to the right salon's login.
+const PROTECTED = ['/app', '/admin', '/onboarding'];
 
 export async function middleware(request: NextRequest) {
-  const { response, userId } = await updateSession(request);
-  const path = request.nextUrl.pathname;
-  if (!userId && PROTECTED.some((p) => path === p || path.startsWith(p + '/'))) {
-    const url = request.nextUrl.clone();
-    url.pathname = path.startsWith('/me') ? '/me/login' : '/login';
-    url.searchParams.set('next', path);
-    if (path === '/me/login') return response;
-    return NextResponse.redirect(url);
+  const url = request.nextUrl;
+  const decision = routeRequest(request.headers.get('host'), url.pathname, url.search);
+  if (decision.kind === 'redirect') return NextResponse.redirect(new URL(decision.url, request.url), 308);
+
+  // Never trust a salon header sent by the browser; set it only from the host name.
+  const headers = new Headers(request.headers);
+  headers.delete(SALON_HEADER);
+  if (decision.salon) headers.set(SALON_HEADER, decision.salon);
+  headers.set(PATH_HEADER, url.pathname + url.search);
+
+  let rewriteTo: URL | undefined;
+  if (decision.kind === 'rewrite') {
+    rewriteTo = url.clone();
+    rewriteTo.pathname = decision.pathname;
+  }
+
+  const { response, userId } = await updateSession(request, headers, rewriteTo);
+  if (!userId && PROTECTED.some((p) => url.pathname === p || url.pathname.startsWith(p + '/'))) {
+    const login = url.clone();
+    login.pathname = '/login';
+    login.search = '';
+    login.searchParams.set('next', url.pathname);
+    return NextResponse.redirect(login);
   }
   return response;
 }

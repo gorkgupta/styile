@@ -8,7 +8,7 @@ Time needed: about an hour for the first deploy, plus Meta's review time for Wha
 2. Apply the database: either
    * `npx supabase link --project-ref <ref>` then `npx supabase db push` (runs `supabase/migrations/*` in order), or
    * paste `0001_schema.sql`, `0002_security.sql`, `0003_functions.sql` into **SQL editor** one after another.
-3. **Authentication → URL configuration**: Site URL `https://YOUR-DOMAIN`; add `https://YOUR-DOMAIN/**` to redirect URLs.
+3. **Authentication → URL configuration**: Site URL `https://styile.com`; add both `https://styile.com/**` and `https://*.styile.com/**` to redirect URLs (salon sites live on subdomains).
 4. **Authentication → Providers**:
    * **Email**: on (owners and staff sign in with email + password). Keep "Confirm email" on.
    * **Phone**: on (customers sign in with a code). No SMS provider is needed because of the hook below. Keep "Enable phone confirmations" on: a client's bookings and bills are linked to whoever proves they own the number.
@@ -27,7 +27,7 @@ The app is a standard Next.js app built for Workers with `@opennextjs/cloudflare
 **From GitHub (recommended):** Workers & Pages → Create → Import a repository → pick the repo.
 * Build command: `npx opennextjs-cloudflare build`
 * Deploy command: `npx opennextjs-cloudflare deploy`
-* Build variables (needed at build time): `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_APP_NAME`.
+* Build variables (needed at build time): `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_APP_URL` (`https://styile.com`), `NEXT_PUBLIC_ROOT_DOMAIN` (`styile.com`), `NEXT_PUBLIC_APP_NAME`, `NEXT_PUBLIC_SUPPORT_EMAIL`.
 
 **From your laptop:** `npm install`, `npx wrangler login`, `npm run deploy`.
 
@@ -37,13 +37,33 @@ Then add **secrets** (Worker → Settings → Variables and secrets, or `npx wra
 |---|---|
 | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase API settings (also needed at runtime) |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase API settings — keep secret |
-| `NEXT_PUBLIC_APP_URL` | `https://YOUR-DOMAIN` |
+| `NEXT_PUBLIC_APP_URL` | `https://styile.com` |
+| `NEXT_PUBLIC_ROOT_DOMAIN` | `styile.com` — turns on salon addresses like `glowstudio.styile.com` |
 | `CRON_SECRET` | any long random string (same as in `schedules.sql`) |
 | `WHATSAPP_APP_SECRET`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PLATFORM_PHONE_NUMBER_ID` | see `docs/WHATSAPP.md` |
 | `ANTHROPIC_API_KEY` | console.anthropic.com |
 | `SUPABASE_SMS_HOOK_SECRET` | Supabase auth hook (step 1.5) |
 
-**Custom domain:** Worker → Settings → Domains & Routes → add `app.yourdomain.in` (the domain must be on Cloudflare DNS).
+**Domain and salon addresses (styile.com):**
+
+1. Add `styile.com` to Cloudflare (Websites → Add a site) and point your registrar's nameservers to Cloudflare.
+2. DNS → add a record for every salon at once: type `AAAA`, name `*`, content `100::`, **Proxied** (orange cloud). Cloudflare's free Universal SSL covers `*.styile.com`.
+3. `wrangler.jsonc` already routes `styile.com` (custom domain) and `*.styile.com/*` to the Worker, so `npm run deploy` attaches both. (From the dashboard: Worker → Settings → Domains & Routes.)
+4. Optional: a Redirect Rule from `www.styile.com/*` to `https://styile.com/$1`.
+
+A new salon's address works the moment the owner finishes sign-up — nothing to set up per salon. Old `styile.com/s/<salon>` links redirect to the salon's address.
+
+**How addresses behave**
+
+| Address | Shows |
+|---|---|
+| `styile.com` | Your website, salon sign-up, `/admin` |
+| `glowstudio.styile.com` | Glow Studio's booking page |
+| `glowstudio.styile.com/me` | A client's bookings, bills and coins at Glow Studio only |
+| `glowstudio.styile.com/app` | Staff app, locked to Glow Studio |
+| `styile.com/b/<bill id>` | Short bill link used in WhatsApp; forwards to the salon's site |
+
+One login works on every address (the session cookie is set for `.styile.com`), so a client who visits two Styile salons signs in once, but each salon's site only ever shows that salon.
 
 ## 3. WhatsApp and Claude
 

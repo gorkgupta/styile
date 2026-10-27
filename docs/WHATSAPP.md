@@ -41,7 +41,7 @@ Replies inside the 24-hour customer-service window are free-form. Outside it (re
 |---|---|
 | `booking_confirmation` | Hi {{1}}, your appointment at {{2}} is confirmed for {{3}} with {{4}}: {{5}}. Reply to this message to change or cancel. |
 | `appointment_reminder` | Hi {{1}}, a reminder about your {{2}} on {{3}} with {{4}} at {{5}}. Reply to this message if you need to change it. |
-| `bill_receipt` | Hi {{1}}, thank you for visiting {{2}}! Your bill {{3}} for {{4}} is ready. — with a **URL button** "View bill" → `https://YOUR-DOMAIN/me/bills/{{1}}` |
+| `bill_receipt` | Hi {{1}}, thank you for visiting {{2}}! Your bill {{3}} for {{4}} is ready. — with a **URL button** "View bill" → `https://styile.com/b/{{1}}` (one link for every salon; it forwards to the bill on the salon's own address) |
 
 Optional: add Hindi (`hi`) versions with the same names.
 

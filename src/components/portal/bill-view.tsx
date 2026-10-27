@@ -24,7 +24,7 @@ const STATUS: Record<InvoiceStatus, { label: string; tone: 'success' | 'marigold
   paid: { label: 'Paid', tone: 'success' }, partial: { label: 'Part paid', tone: 'marigold' }, unpaid: { label: 'Unpaid', tone: 'marigold' }, void: { label: 'Cancelled', tone: 'danger' },
 };
 
-export function BillView({ bill, phone }: { bill: CustomerBill; phone?: string }) {
+export function BillView({ bill, phone, base }: { bill: CustomerBill; phone?: string; base: string }) {
   const { salon, invoice: inv } = bill;
   const balance = Math.max(0, Number(inv.total) - Number(inv.paid_total));
   const address = [salon.address, salon.city, salon.state, salon.pincode].filter(Boolean).join(', ');
@@ -32,10 +32,10 @@ export function BillView({ bill, phone }: { bill: CustomerBill; phone?: string }
   const halfRate = rates.length === 1 ? `${rates[0] / 2}%` : '';
   return (
     <div className="pt">
-      <div className="no-print"><PortalHeader phone={phone} /></div>
+      <div className="no-print"><PortalHeader phone={phone} base={base} salonName={salon.name} /></div>
       <main className="pt-wrap pt-main">
         <div className="between no-print">
-          <Link href="/me" className="btn btn-ghost btn-sm"><Icon name="chevronLeft" size={16} />All bookings</Link>
+          <Link href={`${base}/me`} className="btn btn-ghost btn-sm"><Icon name="chevronLeft" size={16} />Your bookings</Link>
           <Button size="sm" icon="printer" onClick={() => window.print()}>Print or save PDF</Button>
         </div>
         <article className="pt-bill">
@@ -113,7 +113,7 @@ export function BillView({ bill, phone }: { bill: CustomerBill; phone?: string }
           <p className="tiny muted" style={{ textAlign: 'center' }}>Thank you for visiting {salon.name}.</p>
         </article>
         <div className="no-print" style={{ textAlign: 'center' }}>
-          <Link className="btn btn-secondary" href={`/s/${salon.slug}`}>Book again at {salon.name}</Link>
+          <Link className="btn btn-secondary" href={base || '/'}>Book again at {salon.name}</Link>
         </div>
       </main>
     </div>

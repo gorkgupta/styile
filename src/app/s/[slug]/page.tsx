@@ -7,6 +7,8 @@ import { loadCatalog } from '@/lib/booking';
 import { localDate } from '@/lib/time';
 import { normalizePhone } from '@/lib/phone';
 import { BookingFlow } from '@/components/public/booking-flow';
+import { salonSiteBase } from '@/lib/site';
+import { isReservedSlug } from '@/lib/tenant';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,7 +16,7 @@ const SLUG_RE = /^[a-z0-9]([a-z0-9-]{1,38}[a-z0-9])$/;
 
 /** The salon behind a booking link, or null when the link is wrong or the salon isn't taking online bookings. */
 const findSalon = cache(async (slug: string) => {
-  if (!SLUG_RE.test(slug)) return null;
+  if (!SLUG_RE.test(slug) || isReservedSlug(slug)) return null;
   const { data } = await createAdminClient().from('salons')
     .select('id, name, city').eq('slug', slug).eq('booking_enabled', true)
     .not('plan_status', 'in', '(suspended,cancelled)').maybeSingle();
@@ -71,6 +73,7 @@ export default async function Page({ params }: { params: Promise<{ slug: string 
       skills={skills}
       today={localDate(new Date(), salon.timezone)}
       me={me}
+      base={await salonSiteBase(slug)}
     />
   );
 }

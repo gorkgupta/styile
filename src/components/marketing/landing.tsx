@@ -10,7 +10,7 @@ const FEATURES: { icon: IconName; title: string; body: string }[] = [
   { icon: 'users', title: 'Client history and colour notes', body: 'Every visit, every bill, and the notes that matter: shade 5.3 with 20 vol, sensitive scalp, prefers Meera.' },
   { icon: 'wallet', title: 'Team commissions', body: 'Set a commission per stylist. Styile adds up what each person earned from the services they did.' },
   { icon: 'chart', title: 'Reports', body: 'Revenue by day, stylist and service. See how many bookings came from WhatsApp, walk-ins and the phone.' },
-  { icon: 'link', title: 'Your own booking page', body: 'A link like styile.com/s/your-salon for Instagram and Google. Clients pick a service, a stylist and a time.' },
+  { icon: 'link', title: 'Your own booking page', body: 'Your own address like yoursalon.styile.com for Instagram and Google. Clients pick a service, a stylist and a time, and see their bookings there.' },
 ];
 
 const STEPS: { title: string; body: string }[] = [
@@ -145,7 +145,7 @@ export function LandingPage() {
           <nav className="stack-sm small" aria-label="Account">
             <Link href="/login">Salon log in</Link>
             <Link href="/signup">Start free trial</Link>
-            <Link href="/me/login">Client bookings</Link>
+            <Link href="/me">Client bookings</Link>
           </nav>
           <p className="tiny muted mk-footer-legal">© {new Date().getFullYear()} Styile. Prices in INR, GST extra.</p>
         </div>

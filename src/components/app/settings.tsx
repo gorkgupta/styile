@@ -1,4 +1,5 @@
 'use client';
+import { rootDomain, salonUrl } from '@/lib/tenant';
 import { useEffect, useState, useTransition, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { Badge, Button, Notice, Panel, SelectField, Switch, TextArea, TextField, useToast } from '@/components/ui/ui';
@@ -209,7 +210,7 @@ function BookingSection({ salon }: { salon: Salon }) {
   const { pending, error, run } = useSave();
   const toast = useToast();
   useEffect(() => { setOrigin(window.location.origin); }, []);
-  const url = `${origin}/s/${salon.slug}`;
+  const url = rootDomain() ? salonUrl(salon.slug) : `${origin}/s/${salon.slug}`;
   const leads = [0, 15, 30, 60, 120, 180, 240, 720, 1440, 2880];
   const leadLabel = (m: number) => (m === 0 ? 'No notice' : m < 60 ? `${m} minutes` : m < 1440 ? `${m / 60} hour${m === 60 ? '' : 's'}` : `${m / 1440} day${m === 1440 ? '' : 's'}`);
   const leadOptions = leads.includes(Number(lead)) ? leads : [...leads, Number(lead)].sort((a, b) => a - b);
@@ -225,9 +226,9 @@ function BookingSection({ salon }: { salon: Salon }) {
           <Icon name="link" size={18} className="muted" />
           <code className="grow truncate">{url.replace(/^https?:\/\//, '')}</code>
           <Button size="sm" icon="copy" onClick={() => { navigator.clipboard?.writeText(url); toast('Booking link copied'); }}>Copy</Button>
-          <a className="btn btn-sm btn-secondary" href={`/s/${salon.slug}`} target="_blank" rel="noreferrer"><Icon name="external" size={16} />Open</a>
+          <a className="btn btn-sm btn-secondary" href={rootDomain() ? salonUrl(salon.slug) : `/s/${salon.slug}`} target="_blank" rel="noreferrer"><Icon name="external" size={16} />Open</a>
         </div>
-        <p className="small muted">Add it to your Instagram bio and Google Business profile. Ask the Styile team if you want a different link.</p>
+        <p className="small muted">This is your salon’s own address. Add it to your Instagram bio and Google Business profile; clients also see their bookings and bills here. Ask the Styile team if you want a different address.</p>
         <div className="setting-row">
           <div className="grow">
             <div className="strong">Accept online bookings</div>

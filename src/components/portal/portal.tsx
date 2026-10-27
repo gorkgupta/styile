@@ -29,20 +29,25 @@ export interface PortalBill { id: string; salonId: string; invoice_no: string; c
 export interface PortalProps {
   me: { name: string; phone: string };
   nowIso: string;
-  salons: PortalSalon[];
+  /** Link prefix of this salon's site: "" on its own subdomain, "/s/<slug>" otherwise. */
+  base: string;
+  /** The salon whose site this is. Clients only ever see their bookings with this salon here. */
+  salon: PortalSalon;
+  /** Whether this number has any client record at the salon yet. */
+  known: boolean;
   upcoming: PortalVisit[];
   past: PortalVisit[];
   bills: PortalBill[];
 }
 
 /** Simple top bar shared by the client portal pages. */
-export function PortalHeader({ phone, children }: { phone?: string; children?: ReactNode }) {
+export function PortalHeader({ phone, children, base = '', salonName }: { phone?: string; children?: ReactNode; base?: string; salonName?: string }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   return (
     <header className="pt-head">
       <div className="pt-wrap between">
-        <Link href="/me" className="mk-logo" style={{ fontSize: 17 }}><span className="brand-mark" style={{ width: 28, height: 28, fontSize: 15 }}>S</span>My bookings</Link>
+        <Link href={`${base}/me`} className="mk-logo" style={{ fontSize: 17 }}><span className="brand-mark" style={{ width: 28, height: 28, fontSize: 15 }}>{(salonName ?? 'S').trim()[0]?.toUpperCase()}</span>{salonName ?? 'My bookings'}</Link>
         <div className="row">
           {children}
           {phone && <span className="small muted hide-mobile">{formatPhone(phone)}</span>}
@@ -50,7 +55,7 @@ export function PortalHeader({ phone, children }: { phone?: string; children?: R
             <Button size="sm" variant="ghost" icon="logout" loading={busy} onClick={async () => {
               setBusy(true);
               await createClient().auth.signOut();
-              router.replace('/me/login');
+              router.replace(`${base}/me/login`);
               router.refresh();
             }}>Sign out</Button>
           )}
@@ -63,24 +68,26 @@ export function PortalHeader({ phone, children }: { phone?: string; children?: R
 const INVOICE_LABEL: Record<InvoiceStatus, string> = { paid: 'Paid', partial: 'Part paid', unpaid: 'Unpaid', void: 'Cancelled' };
 
 export function PortalHome(p: PortalProps) {
-  const salonById = new Map<string, PortalSalon>(p.salons.map((s) => [s.id, s]));
+  const salonById = new Map<string, PortalSalon>([[p.salon.id, p.salon]]);
+  const bookHref = p.base || '/';
   const [cancelling, setCancelling] = useState<PortalVisit | null>(null);
   const [moving, setMoving] = useState<PortalVisit | null>(null);
   const first = p.me.name.split(' ')[0];
 
   return (
     <div className="pt">
-      <PortalHeader phone={p.me.phone} />
+      <PortalHeader phone={p.me.phone} base={p.base} salonName={p.salon.name} />
       <main className="pt-wrap pt-main">
         <div className="stack-sm">
           <h1>{first ? `Hi ${first}` : 'Your bookings'}</h1>
-          <p className="muted">Your appointments and bills{p.salons.length === 1 ? ` at ${p.salons[0].name}` : p.salons.length ? ' across salons' : ''}.</p>
+          <p className="muted">Your appointments and bills at {p.salon.name}.</p>
         </div>
 
-        {!p.salons.length ? (
+        {!p.known ? (
           <div className="panel">
-            <Empty icon="calendar" title="No bookings for this number yet">
-              When you book at a salon that uses Styile with {formatPhone(p.me.phone)}, your appointments and bills show up here.
+            <Empty icon="calendar" title={`No bookings at ${p.salon.name} yet`}
+              action={p.salon.bookingEnabled ? <Link className="btn btn-primary" href={bookHref}>Book an appointment</Link> : undefined}>
+              When you book with {formatPhone(p.me.phone)}, your appointments and bills show up here.
             </Empty>
           </div>
         ) : (
@@ -105,8 +112,7 @@ export function PortalHome(p: PortalProps) {
                         {fmtDateLong(date)} · {fmtTime(v.start_at, tz)} – {fmtTime(v.end_at, tz)}
                       </div>
                       <div className="small row" style={{ gap: 6 }}>
-                        {v.stylist && <><span className="dot" style={{ background: v.stylist.color }} />{v.stylist.name} ·</>}
-                        <span className="ink2">{salon.name}</span>
+                        {v.stylist ? <><span className="dot" style={{ background: v.stylist.color }} /><span className="ink2">with {v.stylist.name}</span></> : <span className="ink2">{salon.name}</span>}
                         {v.status === 'confirmed' && <Badge tone="peacock">Confirmed</Badge>}
                       </div>
                       <div className="row-wrap pt-actions">
@@ -120,7 +126,7 @@ export function PortalHome(p: PortalProps) {
               }) : (
                 <div className="pt-empty">
                   <p className="muted">No upcoming appointments.</p>
-                  {p.salons.filter((s) => s.bookingEnabled).slice(0, 1).map((s) => <Link key={s.id} className="btn btn-primary btn-sm" href={`/s/${s.slug}`}>Book at {s.name}</Link>)}
+                  {p.salon.bookingEnabled && <Link className="btn btn-primary btn-sm" href={bookHref}>Book an appointment</Link>}
                 </div>
               )}
             </section>
@@ -139,11 +145,11 @@ export function PortalHome(p: PortalProps) {
                         <div className="pt-date-chip num"><span>{fmtDateShort(date).split(' ')[1]}</span><span>{fmtDateShort(date).split(' ')[2]}</span></div>
                         <div className="grow" style={{ minWidth: 0 }}>
                           <div className={muted ? 'truncate muted' : 'truncate strong'} style={muted ? { textDecoration: 'line-through' } : undefined}>{v.services.map((s) => s.name).join(', ')}</div>
-                          <div className="small muted truncate">{salon.name}{v.stylist ? ` · ${v.stylist.name}` : ''}</div>
+                          <div className="small muted truncate">{v.stylist ? v.stylist.name : salon.name}</div>
                         </div>
                         {muted ? <Badge tone="danger">{STATUS_LABEL[v.status]}</Badge>
-                          : v.invoiceId ? <Link className="btn btn-ghost btn-sm" href={`/me/bills/${v.invoiceId}`}>Bill</Link>
-                          : salon.bookingEnabled ? <Link className="btn btn-ghost btn-sm" href={`/s/${salon.slug}`}>Book again</Link> : null}
+                          : v.invoiceId ? <Link className="btn btn-ghost btn-sm" href={`${p.base}/me/bills/${v.invoiceId}`}>Bill</Link>
+                          : salon.bookingEnabled ? <Link className="btn btn-ghost btn-sm" href={bookHref}>Book again</Link> : null}
                       </li>
                     );
                   })}
@@ -159,11 +165,11 @@ export function PortalHome(p: PortalProps) {
                     const salon = salonById.get(b.salonId);
                     return (
                       <li key={b.id} style={{ padding: 0 }}>
-                        <Link href={`/me/bills/${b.id}`} className="row pt-bill-row">
+                        <Link href={`${p.base}/me/bills/${b.id}`} className="row pt-bill-row">
                           <span className="pt-bill-icon"><Icon name="receipt" size={18} /></span>
                           <div className="grow" style={{ minWidth: 0 }}>
-                            <div className="strong truncate">{salon?.name ?? 'Salon'}</div>
-                            <div className="small muted">{b.invoice_no} · {salon ? fmtDateShort(localDate(new Date(b.created_at), salon.timezone)) : ''}</div>
+                            <div className="strong truncate">{salon ? fmtDateShort(localDate(new Date(b.created_at), salon.timezone)) : ''}</div>
+                            <div className="small muted">Bill {b.invoice_no}</div>
                           </div>
                           <div className="right">
                             <div className="num strong">{money(b.total)}</div>
@@ -178,19 +184,12 @@ export function PortalHome(p: PortalProps) {
               ) : <p className="muted small">Bills from your visits will appear here.</p>}
             </section>
 
-            <section className="stack">
-              <h2>Your salons</h2>
-              <div className="pt-salons">
-                {p.salons.map((s) => (
-                  <div key={s.id} className="pt-salon">
-                    <div className="grow" style={{ minWidth: 0 }}>
-                      <div className="strong truncate">{s.name}</div>
-                      <div className="small muted truncate">{[s.city, s.phone ? formatPhone(s.phone) : null].filter(Boolean).join(' · ')}</div>
-                    </div>
-                    {s.bookingEnabled && <Link className="btn btn-secondary btn-sm" href={`/s/${s.slug}`}>Book again</Link>}
-                  </div>
-                ))}
+            <section className="pt-salon">
+              <div className="grow" style={{ minWidth: 0 }}>
+                <div className="strong truncate">{p.salon.name}</div>
+                <div className="small muted truncate">{[p.salon.city, p.salon.phone ? formatPhone(p.salon.phone) : null].filter(Boolean).join(' · ')}</div>
               </div>
+              {p.salon.bookingEnabled && <Link className="btn btn-secondary btn-sm" href={bookHref}>Book again</Link>}
             </section>
           </>
         )}
