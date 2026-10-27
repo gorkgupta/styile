@@ -5,6 +5,7 @@ import { Avatar, Badge, Button, Dialog, Empty, Notice, Panel, Segmented, SelectF
 import { Icon } from '@/components/ui/icons';
 import { Topbar } from './shell';
 import { HoursEditor } from './hours-editor';
+import { removeStaffPhoto, StylistProfileFields, type StylistProfileValue } from './stylist-profile';
 import { changeMemberRole, deactivateStaff, inviteMember, removeMember, saveStaff } from '@/actions/team';
 import { daysLabel, openDays, WEEK_DAYS } from '@/lib/hours';
 import { formatPhone } from '@/lib/phone';
@@ -15,6 +16,7 @@ import { ROLE_LABEL } from '@/lib/types';
 export interface TeamMemberRow { user_id: string; role: MemberRole; staff_id: string | null; name: string | null; email: string | null }
 
 export interface TeamProps {
+  salonId: string;                     // folder for stylist photos in storage
   staff: Staff[];                      // including inactive
   skills: Record<string, string[]>;    // staff id -> service ids; missing/empty = all services
   services: Service[];                 // active services
@@ -76,7 +78,7 @@ export function TeamScreen(p: TeamProps) {
 
         <AccessPanel {...p} />
       </div>
-      <StaffSheet editing={editing} onClose={() => setEditing(null)} team={p.staff} services={p.services} categories={p.categories}
+      <StaffSheet salonId={p.salonId} editing={editing} onClose={() => setEditing(null)} team={p.staff} services={p.services} categories={p.categories}
         skills={p.skills} branchHours={p.branchHours} member={editing && editing !== 'new' ? memberByStaff.get(editing.id) : undefined} />
     </>
   );
@@ -90,11 +92,12 @@ function StaffRow({ s, branchHours, skills, totalServices, member, onOpen }: {
   return (
     <li style={{ padding: 0 }}>
       <button type="button" className="staff-row" onClick={onOpen}>
-        <Avatar name={s.name} color={s.active ? s.color : 'var(--faint)'} />
+        <Avatar name={s.name} color={s.active ? s.color : 'var(--faint)'} photo={s.active ? s.photo_url : null} />
         <div className="staff-name">
           <div className="row" style={{ gap: 6, minWidth: 0 }}>
             <span className="strong truncate">{s.name}</span>
             {!s.bookable && s.active && <Badge>Not bookable</Badge>}
+            {s.bookable && s.active && s.show_on_booking === false && <Badge tone="marigold">Desk only</Badge>}
           </div>
           <div className="small muted truncate">{[s.title, formatPhone(s.phone)].filter(Boolean).join(' · ') || 'No title'}</div>
         </div>
@@ -112,8 +115,8 @@ function StaffRow({ s, branchHours, skills, totalServices, member, onOpen }: {
   );
 }
 
-function StaffSheet({ editing, onClose, team, services, categories, skills, branchHours, member }: {
-  editing: Staff | 'new' | null; onClose: () => void; team: Staff[]; services: Service[]; categories: ServiceCategory[];
+function StaffSheet({ salonId, editing, onClose, team, services, categories, skills, branchHours, member }: {
+  salonId: string; editing: Staff | 'new' | null; onClose: () => void; team: Staff[]; services: Service[]; categories: ServiceCategory[];
   skills: Record<string, string[]>; branchHours: Hours; member?: TeamMemberRow;
 }) {
   const existing = editing && editing !== 'new' ? editing : null;
@@ -127,6 +130,7 @@ function StaffSheet({ editing, onClose, team, services, categories, skills, bran
   const [hours, setHours] = useState<Hours>(branchHours);
   const [allServices, setAllServices] = useState(true);
   const [serviceIds, setServiceIds] = useState<string[]>([]);
+  const [profile, setProfile] = useState<StylistProfileValue>({ photoUrl: null, bio: '', specialties: [], years: '', showOnBooking: true });
   const [error, setError] = useState<string | null>(null);
   const [confirmOff, setConfirmOff] = useState(false);
   const [pending, start] = useTransition();
@@ -148,6 +152,10 @@ function StaffSheet({ editing, onClose, team, services, categories, skills, bran
     const own = s ? skills[s.id] ?? [] : [];
     setAllServices(!own.length);
     setServiceIds(own);
+    setProfile({
+      photoUrl: s?.photo_url ?? null, bio: s?.bio ?? '', specialties: s?.specialties ?? [],
+      years: s?.years_experience == null ? '' : String(s.years_experience), showOnBooking: s?.show_on_booking ?? true,
+    });
     setError(null);
   }, [editing, team, skills, branchHours]);
 
@@ -168,8 +176,11 @@ function StaffSheet({ editing, onClose, team, services, categories, skills, bran
     const r = await saveStaff({
       id: existing?.id, name, title, phone, color, commissionPct: Number(commission || 0), bookable, active: existing?.active ?? true,
       workingHours: ownHours ? hours : null, serviceIds: allServices ? [] : serviceIds,
+      photoUrl: profile.photoUrl, bio: profile.bio, specialties: profile.specialties,
+      yearsExperience: profile.years === '' ? null : Number(profile.years), showOnBooking: profile.showOnBooking,
     });
     if (!r.ok) return setError(r.error);
+    if (existing?.photo_url && existing.photo_url !== profile.photoUrl) void removeStaffPhoto(existing.photo_url);
     toast(r.message ?? 'Saved');
     router.refresh();
     onClose();
@@ -188,7 +199,7 @@ function StaffSheet({ editing, onClose, team, services, categories, skills, bran
   return (
     <>
       <Sheet open={!!editing} onClose={onClose} width={560}
-        title={existing ? <div className="row" style={{ minWidth: 0 }}><Avatar name={existing.name} color={color} size="sm" /><h2 className="truncate">{existing.name}</h2></div> : 'Add team member'}
+        title={existing ? <div className="row" style={{ minWidth: 0 }}><Avatar name={existing.name} color={color} photo={profile.photoUrl} size="sm" /><h2 className="truncate">{existing.name}</h2></div> : 'Add team member'}
         footer={<>
           {existing && (existing.active
             ? <Button variant="danger" onClick={() => setConfirmOff(true)} style={{ marginRight: 'auto' }}><span className="hide-mobile">Remove from team</span><span className="show-mobile">Remove</span></Button>
@@ -237,6 +248,15 @@ function StaffSheet({ editing, onClose, team, services, categories, skills, bran
               </div>
               <Switch checked={bookable} onChange={setBookable} label={<span className="sr-only">Takes appointments</span>} />
             </div>
+          </section>
+
+          <section className="stack">
+            <div>
+              <h3>Booking page profile</h3>
+              <p className="small muted">What clients see when they choose a stylist online.</p>
+            </div>
+            <StylistProfileFields value={profile} onChange={setProfile} name={name} color={color} salonId={salonId}
+              staffId={existing?.id ?? null} bookable={bookable} />
           </section>
 
           <section className="stack">

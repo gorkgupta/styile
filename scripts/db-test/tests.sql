@@ -184,6 +184,79 @@ select t.ok((select count(*) from public.salons) = 2, 'platform admin sees all s
 update public.salons set plan = 'growth', plan_status = 'active' where id = :'salon_a';
 select t.ok((select plan from public.salons where id = :'salon_a') = 'growth', 'platform admin can change plan');
 
+-- ===== Stylist profiles (0006): public profile fields =====
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-00000000000a","role":"authenticated"}', false);
+update public.staff set photo_url = 'https://abc.supabase.co/storage/v1/object/public/staff-photos/' || :'salon_a' || '/p-1.jpg',
+  bio = 'Ten years of precision cuts and soft balayage.', specialties = '{Balayage,"Global colour",Bobs}', years_experience = 10, show_on_booking = false
+  where id = :'priya';
+select t.ok((select photo_url like 'https://%' and cardinality(specialties) = 3 and years_experience = 10 and not show_on_booking
+               from public.staff where id = :'priya'), 'owner can set a stylist''s photo, bio, specialties, experience, visibility');
+select t.ok((select show_on_booking and specialties = '{}' and photo_url is null from public.staff where id = :'meera_staff'), 'new profile fields default to shown, no specialties, no photo');
+select t.fails(format($q$update public.staff set photo_url = 'http://abc.supabase.co/x.jpg' where id = %L$q$, :'priya'), 'stylist photo must be https');
+select t.fails(format($q$update public.staff set photo_url = 'javascript:alert(1)' where id = %L$q$, :'priya'), 'stylist photo cannot be a script URL');
+select t.fails(format($q$update public.staff set photo_url = 'https://x.co/a.jpg" onerror="alert(1)' where id = %L$q$, :'priya'), 'stylist photo URL cannot break out of an attribute');
+select t.fails(format($q$update public.staff set specialties = '{a,b,c,d,e,f,g,h,i}' where id = %L$q$, :'priya'), 'at most 8 specialties');
+select t.fails(format($q$update public.staff set specialties = array[repeat('x', 31)] where id = %L$q$, :'priya'), 'each specialty at most 30 characters');
+select t.fails(format($q$update public.staff set specialties = array['  '] where id = %L$q$, :'priya'), 'blank specialty rejected');
+select t.fails(format($q$update public.staff set specialties = null where id = %L$q$, :'priya'), 'specialties cannot be null');
+select t.fails(format($q$update public.staff set bio = repeat('a', 281) where id = %L$q$, :'priya'), 'bio at most 280 characters');
+select t.fails(format($q$update public.staff set years_experience = 61 where id = %L$q$, :'priya'), 'years of experience at most 60');
+select t.fails(format($q$update public.staff set years_experience = -1 where id = %L$q$, :'priya'), 'years of experience not negative');
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-00000000000c","role":"authenticated"}', false);
+update public.staff set bio = 'Hacked', show_on_booking = true where id = :'priya';
+select t.ok((select bio from public.staff where id = :'priya') = 'Ten years of precision cuts and soft balayage.', 'stylist cannot edit team profiles');
+
+-- ===== Stylist profiles (0006): usual stylist =====
+reset role;
+update public.staff set show_on_booking = true where id = :'priya';
+insert into public.staff (salon_id, branch_id, name) values (:'salon_a', :'branch_a', 'Kiran') returning id as kiran \gset
+insert into public.customers (salon_id, name, phone) values (:'salon_a', 'Isha Kapoor', '919800055555') returning id as isha \gset
+insert into public.customers (salon_id, name, phone) values (:'salon_a', 'New Client', '919800066666') returning id as newbie \gset
+insert into public.appointments (salon_id, customer_id, staff_id, start_at, end_at, status) values
+  -- Priya twice, Meera twice (Meera more recently): tie goes to the most recent
+  (:'salon_a', :'isha', :'priya',       now() - interval '200 days', now() - interval '200 days' + interval '1 hour', 'completed'),
+  (:'salon_a', :'isha', :'priya',       now() - interval '100 days', now() - interval '100 days' + interval '1 hour', 'completed'),
+  (:'salon_a', :'isha', :'meera_staff', now() - interval '150 days', now() - interval '150 days' + interval '1 hour', 'completed'),
+  (:'salon_a', :'isha', :'meera_staff', now() - interval '20 days',  now() - interval '20 days' + interval '1 hour', 'completed'),
+  -- Kiran most often, but over a year ago: doesn't count
+  (:'salon_a', :'isha', :'kiran',       now() - interval '400 days', now() - interval '400 days' + interval '1 hour', 'completed'),
+  (:'salon_a', :'isha', :'kiran',       now() - interval '410 days', now() - interval '410 days' + interval '1 hour', 'completed'),
+  (:'salon_a', :'isha', :'kiran',       now() - interval '420 days', now() - interval '420 days' + interval '1 hour', 'completed'),
+  -- Not completed visits don't count
+  (:'salon_a', :'isha', :'kiran',       now() - interval '10 days',  now() - interval '10 days' + interval '1 hour', 'cancelled'),
+  (:'salon_a', :'isha', :'kiran',       now() - interval '11 days',  now() - interval '11 days' + interval '1 hour', 'no_show'),
+  (:'salon_a', :'isha', :'kiran',       now() + interval '3 days',   now() + interval '3 days' + interval '1 hour', 'booked');
+set role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-00000000000a","role":"authenticated"}', false);
+select t.ok(public.usual_stylist(:'salon_a', :'isha') = :'meera_staff'::uuid, 'usual stylist: tie on visits goes to the most recent (Meera)');
+select t.ok(public.usual_stylist(:'salon_a', :'newbie') is null, 'usual stylist: none for a client without completed visits');
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-00000000000c","role":"authenticated"}', false);
+select t.ok(public.usual_stylist(:'salon_a', :'isha') = :'meera_staff'::uuid, 'any team member (stylist) can look up the usual stylist');
+reset role;
+insert into public.appointments (salon_id, customer_id, staff_id, start_at, end_at, status)
+  values (:'salon_a', :'isha', :'priya', now() - interval '300 days', now() - interval '300 days' + interval '1 hour', 'completed');
+select t.ok(public.usual_stylist(:'salon_a', :'isha') = :'priya'::uuid, 'usual stylist: most completed visits in 12 months wins (Priya 3 vs Meera 2)');
+update public.staff set active = false where id = :'priya';
+select t.ok(public.usual_stylist(:'salon_a', :'isha') = :'meera_staff'::uuid, 'usual stylist skips someone who left the team');
+update public.staff set active = true where id = :'priya';
+set role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', false);
+select t.ok(public.usual_stylist(:'salon_a', :'isha') = :'priya'::uuid, 'server (service role) can look up the usual stylist for the booking page');
+set role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-00000000000b","role":"authenticated"}', false);
+select t.fails(format('select public.usual_stylist(%L, %L)', :'salon_a', :'isha'), 'another salon''s member cannot look up this salon''s clients');
+select t.fails(format('select public.usual_stylist(%L, %L)', :'salon_a', :'rohan'), 'another salon''s owner cannot probe a client''s stylist');
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-00000000000d","role":"authenticated"}', false);
+select t.fails(format('select public.usual_stylist(%L, %L)', :'salon_a', :'isha'), 'a client cannot look up another client''s stylist');
+update public.staff set show_on_booking = false where id = :'priya';
+reset role;
+select t.ok((select show_on_booking from public.staff where id = :'priya'), 'client cannot change stylist visibility');
+set role anon;
+select set_config('request.jwt.claims', '{}', false);
+select t.fails(format('select public.usual_stylist(%L, %L)', :'salon_a', :'isha'), 'anonymous cannot look up a usual stylist');
+reset role;
+set role authenticated;
+
 -- ===== Anonymous =====
 reset role;
 set role anon;

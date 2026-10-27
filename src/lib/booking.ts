@@ -56,7 +56,10 @@ export interface AvailabilityQuery {
   date: string;
   staffId?: string | null;
   excludeAppointmentId?: string;
+  /** Client-facing (booking page, WhatsApp, portal): booking rules apply and hidden stylists aren't offered. */
   onlineOnly?: boolean;
+  /** Stays eligible online even if hidden from the booking page: the client's current stylist when moving a booking. */
+  keepStaffId?: string | null;
   now?: Date;
 }
 
@@ -72,6 +75,7 @@ export async function getAvailability(db: SupabaseClient, catalog: BookingCatalo
   const services = pickServices(catalog, q.serviceIds, !!q.onlineOnly);
   const duration = services.reduce((s, x) => s + x.duration_min, 0);
   let staff = qualifiedStaff(catalog.staff, catalog.skills, services.map((s) => s.id));
+  if (q.onlineOnly) staff = staff.filter((s) => s.show_on_booking !== false || (!!q.keepStaffId && s.id === q.keepStaffId));
   if (q.staffId) staff = staff.filter((s) => s.id === q.staffId);
   if (!staff.length) return [];
 
@@ -221,7 +225,7 @@ export async function rescheduleBooking(
   const serviceIds = appt.services.map((s) => s.service_id).filter(Boolean) as string[];
   const startDate = new Date(newStart);
   const date = localDate(startDate, catalog.salon.timezone);
-  const slots = await getAvailability(db, catalog, { serviceIds, date, staffId, excludeAppointmentId: appt.id, onlineOnly: true });
+  const slots = await getAvailability(db, catalog, { serviceIds, date, staffId, excludeAppointmentId: appt.id, onlineOnly: true, keepStaffId: appt.staff_id });
   const slot = slots.find((s) => s.start === startDate.toISOString());
   if (!slot) throw new BookingError('That time is not available. Please pick another slot.');
   const ordered = appt.staff_id && slot.staffIds.includes(appt.staff_id)

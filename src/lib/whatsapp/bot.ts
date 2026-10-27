@@ -105,6 +105,11 @@ async function handleMessage(phoneNumberId: string, profileName: string | null, 
       .map((x) => ({ role: x.direction === 'in' ? 'user' as const : 'assistant' as const, text: x.body as string }));
 
     const { data: cats } = await db.from('service_categories').select('id, name').eq('salon_id', salon.id);
+
+    // Clients only see stylists offered online; their usual one (most visits in the last year) is offered first.
+    const team = catalog.staff.filter((s) => s.bookable && s.show_on_booking !== false);
+    const { data: usualId } = await db.rpc('usual_stylist', { p_salon: salon.id, p_customer: customer.id });
+    const usual = team.find((s) => s.id === usualId) ?? null;
     const catMap = new Map<string, string>((cats ?? []).map((c: { id: string; name: string }) => [c.id, c.name] as [string, string]));
 
     const ctx: EngineContext = {
@@ -116,8 +121,11 @@ async function handleMessage(phoneNumberId: string, profileName: string | null, 
         id: s.id, name: s.name, category: s.category_id ? catMap.get(s.category_id) ?? null : null,
         duration_min: s.duration_min, price: Number(s.price), gender: s.gender, online_bookable: s.online_bookable,
       })),
-      staff: catalog.staff.filter((s) => s.bookable).map((s) => ({ id: s.id, name: s.name, title: s.title })),
-      customer: { name: customer.name, visits: (customer as { visit_count?: number }).visit_count ?? 0 },
+      staff: team.map((s) => ({ id: s.id, name: s.name, title: s.title, specialties: s.specialties ?? [] })),
+      customer: {
+        name: customer.name, visits: (customer as { visit_count?: number }).visit_count ?? 0,
+        usualStylist: usual ? { id: usual.id, name: usual.name } : null,
+      },
       now: new Date(),
       history,
       pending: ((fresh?.state as { pending?: Pending } | null)?.pending) ?? null,

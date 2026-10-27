@@ -7,6 +7,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { env } from '@/lib/env';
 import { cleanHours } from '@/lib/hours';
 import { normalizePhone } from '@/lib/phone';
+import { cleanBio, cleanSpecialties, cleanYears, isStaffPhotoUrl } from '@/lib/stylists';
 import type { ActionResult, Hours, MemberRole } from '@/lib/types';
 import { ROLE_LABEL } from '@/lib/types';
 
@@ -33,6 +34,14 @@ export interface StaffInput {
   workingHours: Hours | null;
   /** Services they perform; empty = all services */
   serviceIds: string[];
+  // Booking page profile. Left out = unchanged.
+  /** Public URL of a photo uploaded to this salon's folder in the staff-photos bucket; null = no photo. */
+  photoUrl?: string | null;
+  bio?: string | null;
+  specialties?: string[];
+  yearsExperience?: number | null;
+  /** false = front desk only: not offered to clients online or on WhatsApp. */
+  showOnBooking?: boolean;
 }
 
 export async function saveStaff(input: StaffInput): Promise<ActionResult<{ id: string }>> {
@@ -60,6 +69,31 @@ export async function saveStaff(input: StaffInput): Promise<ActionResult<{ id: s
       workingHours = h.hours;
     }
 
+    // Booking page profile (the database checks the same limits).
+    const profile: Record<string, unknown> = {};
+    if (input.photoUrl !== undefined) {
+      if (input.photoUrl !== null && !isStaffPhotoUrl(input.photoUrl, env.supabaseUrl(), ctx.salon.id)) {
+        return { ok: false, error: 'That photo didn’t upload properly. Remove it and add it again.' };
+      }
+      profile.photo_url = input.photoUrl;
+    }
+    if (input.bio !== undefined) {
+      const bio = cleanBio(input.bio);
+      if (!bio.ok) return { ok: false, error: bio.error };
+      profile.bio = bio.value;
+    }
+    if (input.specialties !== undefined) {
+      const sp = cleanSpecialties(input.specialties);
+      if (!sp.ok) return { ok: false, error: sp.error };
+      profile.specialties = sp.value;
+    }
+    if (input.yearsExperience !== undefined) {
+      const years = cleanYears(input.yearsExperience);
+      if (!years.ok) return { ok: false, error: years.error };
+      profile.years_experience = years.value;
+    }
+    if (input.showOnBooking !== undefined) profile.show_on_booking = !!input.showOnBooking;
+
     const serviceIds = [...new Set(input.serviceIds ?? [])];
     if (serviceIds.length) {
       const found = must(await ctx.supabase.from('services').select('id').eq('salon_id', ctx.salon.id).in('id', serviceIds)) as { id: string }[];
@@ -68,7 +102,7 @@ export async function saveStaff(input: StaffInput): Promise<ActionResult<{ id: s
 
     const row = {
       name, phone, title, color, commission_pct: commission, bookable: !!input.bookable,
-      active: input.active ?? true, working_hours: workingHours,
+      active: input.active ?? true, working_hours: workingHours, ...profile,
     };
     let id = input.id;
     if (id) {

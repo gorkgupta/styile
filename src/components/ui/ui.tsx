@@ -90,8 +90,16 @@ export function StatusBadge({ status }: { status: ApptStatus }) {
   return <Badge tone={STATUS_TONE[status]}>{STATUS_LABEL[status]}</Badge>;
 }
 
-export function Avatar({ name, color, size }: { name: string; color?: string; size?: 'sm' | 'lg' }) {
-  return <span className={cx('avatar', size && `avatar-${size}`)} style={color ? { background: color } : undefined} aria-hidden>{initials(name)}</span>;
+/** Initials on the person's colour, or their photo when there is one (initials show if the photo can't load). */
+export function Avatar({ name, color, size, photo, className }: { name: string; color?: string; size?: 'sm' | 'lg' | 'xl'; photo?: string | null; className?: string }) {
+  const [broken, setBroken] = useState(false);
+  useEffect(() => setBroken(false), [photo]);
+  return (
+    <span className={cx('avatar', size && `avatar-${size}`, className)} style={color ? { background: color } : undefined} aria-hidden>
+      {initials(name)}
+      {photo && !broken && <img src={photo} alt="" loading="lazy" decoding="async" onError={() => setBroken(true)} />}
+    </span>
+  );
 }
 
 export function Panel({ title, actions, children, footer, flush, className }: { title?: ReactNode; actions?: ReactNode; children: ReactNode; footer?: ReactNode; flush?: boolean; className?: string }) {

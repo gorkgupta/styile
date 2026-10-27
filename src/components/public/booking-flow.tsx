@@ -2,10 +2,11 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { mainUrl } from '@/lib/tenant';
-import { Button, Notice, TextField, cx } from '@/components/ui/ui';
+import { Avatar, Button, Notice, TextField, cx } from '@/components/ui/ui';
 import { Icon } from '@/components/ui/icons';
-import { bookOnline, getPublicSlots, type BookOnlineResult } from '@/actions/public';
+import { bookOnline, getPublicSlots, getStylistNextFree, type BookOnlineResult } from '@/actions/public';
 import { qualifiedStaff, type Slot } from '@/lib/availability';
+import { experienceLabel, fmtNextFree, type NextFree, type NextFreeResult, type PublicStylist } from '@/lib/stylists';
 import { money } from '@/lib/billing';
 import { formatPhone, initials } from '@/lib/phone';
 import { dayKeyOf, fmtDateLong, fmtDateShort, fmtHhmm } from '@/lib/time';
@@ -14,16 +15,21 @@ import { usePhoneOtp } from './phone-otp';
 import { bookableDays, DateStrip, SlotGrid } from './date-strip';
 
 export interface PublicService { id: string; category_id: string | null; name: string; description: string | null; duration_min: number; price: number; gender: 'unisex' | 'female' | 'male' }
-export interface PublicStaff { id: string; name: string; title: string | null; color: string }
+export type PublicStaff = PublicStylist;
 
 export interface BookingPageProps {
   salon: { name: string; slug: string; address: string | null; city: string | null; phone: string | null; timezone: string; brandColor: string; bookingWindowDays: number };
   hours: Hours;
   categories: { id: string; name: string }[];
   services: PublicService[];
-  staff: PublicStaff[];
+  /** Stylists clients can choose (public profile fields only). */
+  staff: PublicStylist[];
   /** staff id -> service ids they are limited to (missing/empty = can do everything) */
   skills: Record<string, string[]>;
+  /** Signed-in returning client's usual stylist: offered first and pre-selected. */
+  usualStylistId?: string | null;
+  /** From a "book again" link (?stylist=&services=), already validated on the server. */
+  initial?: { serviceIds: string[]; staffId: string | null; step?: 1 | 2 | 3 };
   today: string;
   /** Present when the visitor is already signed in with a verified phone. */
   me: { phone: string; name: string } | null;
@@ -74,11 +80,19 @@ function downloadIcs(opts: { id: string; start: string; end: string; title: stri
 }
 
 export function BookingFlow(p: BookingPageProps) {
-  const [step, setStep] = useState<Step>(1);
-  const [picked, setPicked] = useState<string[]>([]);
-  const [cat, setCat] = useState<string>(() => p.categories.find((c) => p.services.some((s) => s.category_id === c.id))?.id ?? 'other');
-  const [staffId, setStaffId] = useState<string | null>(null);
+  const [step, setStep] = useState<Step>(p.initial?.step ?? 1);
+  const [picked, setPicked] = useState<string[]>(p.initial?.serviceIds ?? []);
+  const [cat, setCat] = useState<string>(() => {
+    const first = p.services.find((s) => s.id === p.initial?.serviceIds[0])?.category_id;
+    if (first && p.categories.some((c) => c.id === first)) return first;
+    return p.categories.find((c) => p.services.some((s) => s.category_id === c.id))?.id ?? 'other';
+  });
+  // What the client chose (or a link / their usual stylist pre-chose). It only applies while that stylist does
+  // every chosen service: otherwise the booking falls back to anyone available.
+  const [staffChoice, setStaffChoice] = useState<string | null>(p.initial?.staffId ?? p.usualStylistId ?? null);
+  const [nextFree, setNextFree] = useState<NextFreeResult | 'loading' | 'error'>('loading');
   const [date, setDate] = useState<string>(p.today);
+  const dateTouched = useRef(false);
   const [slots, setSlots] = useState<Slot[] | null>(null);
   const [slotsError, setSlotsError] = useState<string | null>(null);
   const [slot, setSlot] = useState<Slot | null>(null);
@@ -92,6 +106,7 @@ export function BookingFlow(p: BookingPageProps) {
   const otp = usePhoneOtp();
   const [verified, setVerified] = useState(false); // OTP accepted this session; a retry must not re-verify a used code
   const req = useRef(0);
+  const nfReq = useRef(0);
   const topRef = useRef<HTMLDivElement>(null);
 
   const chosen = useMemo(() => picked.map((id) => p.services.find((s) => s.id === id)).filter((s): s is PublicService => !!s), [picked, p.services]);
@@ -103,7 +118,15 @@ export function BookingFlow(p: BookingPageProps) {
     () => qualifiedStaff(p.staff.map((s) => ({ ...s, bookable: true, active: true })), skillMap, picked),
     [p.staff, skillMap, picked],
   );
+  const staffId = staffChoice && eligible.some((s) => s.id === staffChoice) ? staffChoice : null;
+  const linkStylist = p.initial?.staffId ? p.staff.find((s) => s.id === p.initial?.staffId) ?? null : null;
+  const doesService = (staff: string, service: string) => !p.skills[staff]?.length || p.skills[staff].includes(service);
   const stylist = p.staff.find((s) => s.id === staffId) ?? null;
+  const usual = p.usualStylistId ? p.staff.find((s) => s.id === p.usualStylistId) ?? null : null;
+  // Usual stylist first, then the salon's own order.
+  const offered = useMemo(() => [...eligible].sort((a, b) => Number(b.id === p.usualStylistId) - Number(a.id === p.usualStylistId)), [eligible, p.usualStylistId]);
+  const nextFor = (id: string | null): NextFree | null | undefined =>
+    typeof nextFree === 'string' ? undefined : id ? nextFree.byStaff[id] ?? null : nextFree.any;
 
   const days = useMemo(() => bookableDays(p.today, p.salon.bookingWindowDays, p.hours), [p.today, p.salon.bookingWindowDays, p.hours]);
 
@@ -118,23 +141,39 @@ export function BookingFlow(p: BookingPageProps) {
     return catId === 'other' ? !s?.category_id : s?.category_id === catId;
   }).length;
 
-  // A stylist who can't do the new combination of services is no longer a valid choice.
-  useEffect(() => { if (staffId && !eligible.some((s) => s.id === staffId)) setStaffId(null); }, [eligible, staffId]);
+  // "Next free" times for the stylist step (kept for the time step, to open on the first day with times).
+  const pickedKey = picked.join(',');
+  const wantNextFree = step >= 2 && step <= 4 && picked.length > 0;
+  useEffect(() => {
+    if (!wantNextFree) return;
+    const id = ++nfReq.current;
+    setNextFree('loading');
+    getStylistNextFree(p.salon.slug, pickedKey.split(',')).then((r) => {
+      if (id !== nfReq.current) return;
+      setNextFree(r.ok && r.data ? r.data : 'error');
+    });
+  }, [wantNextFree, pickedKey, p.salon.slug]);
+
+  // Open the time step on the first day the chosen stylist (or anyone) is free, unless the client picked a date.
+  const firstFree = step === 3 ? nextFor(staffId) : undefined;
+  useEffect(() => {
+    if (firstFree && !dateTouched.current && firstFree.date > date) setDate(firstFree.date);
+  }, [firstFree, date]);
 
   // Load times whenever the time step is showing and its inputs change.
   useEffect(() => {
     if (step !== 3 || !picked.length) return;
     const id = ++req.current;
     setSlots(null); setSlotsError(null);
-    getPublicSlots(p.salon.slug, picked, date, staffId).then((r) => {
+    getPublicSlots(p.salon.slug, pickedKey.split(','), date, staffId).then((r) => {
       if (id !== req.current) return;
       if (r.ok) setSlots(r.data ?? []);
       else { setSlots([]); setSlotsError(r.error); }
     });
-  }, [step, date, staffId, picked, p.salon.slug]);
+  }, [step, date, staffId, pickedKey, p.salon.slug]);
 
   // The chosen slot only stays valid for the same date, stylist and services.
-  useEffect(() => { setSlot(null); }, [date, staffId, picked]);
+  useEffect(() => { setSlot(null); }, [date, staffId, pickedKey]);
 
   function go(next: Step) {
     setStep(next);
@@ -186,7 +225,7 @@ export function BookingFlow(p: BookingPageProps) {
       : <span className="muted">Pick one or more services</span>;
     barAction = <Button variant="primary" size="lg" disabled={!picked.length} onClick={() => go(2)}>Continue</Button>;
   } else if (step === 2) {
-    barSummary = <><span className="strong">{stylist ? stylist.name : 'Any stylist'}</span><span className="muted"> · {money(total)}</span></>;
+    barSummary = <><span className="strong">{stylist ? stylist.name : 'Anyone available'}</span><span className="muted"> · {money(total)}</span></>;
     barAction = <Button variant="primary" size="lg" onClick={() => go(3)}>Continue</Button>;
   } else if (step === 3) {
     barSummary = slot ? <span className="strong">{whenLabel}</span> : <span className="muted">Pick a time</span>;
@@ -235,6 +274,16 @@ export function BookingFlow(p: BookingPageProps) {
 
         {step === 1 && (
           <section className="stack">
+            {linkStylist && staffChoice === linkStylist.id && (
+              <div className="bk-with">
+                <Avatar name={linkStylist.name} color={linkStylist.color} photo={linkStylist.photoUrl} />
+                <div className="grow" style={{ minWidth: 0 }}>
+                  <div className="strong truncate">Booking with {linkStylist.name}</div>
+                  <div className="small muted truncate">{linkStylist.title ?? 'Pick the services you’d like'}</div>
+                </div>
+                <button type="button" className="link-btn small" onClick={() => setStaffChoice(null)}>Change</button>
+              </div>
+            )}
             {tabs.length > 1 && (
               <div className="bk-tabs" role="tablist" aria-label="Service categories">
                 {tabs.map((c) => (
@@ -256,6 +305,9 @@ export function BookingFlow(p: BookingPageProps) {
                           {fmtDuration(s.duration_min)}{s.gender !== 'unisex' && <> · {s.gender === 'female' ? 'Women' : 'Men'}</>}
                         </div>
                         {s.description && <div className="small ink2" style={{ marginTop: 2 }}>{s.description}</div>}
+                        {linkStylist && staffChoice === linkStylist.id && !doesService(linkStylist.id, s.id) && (
+                          <div className="tiny muted" style={{ marginTop: 2 }}>Not with {linkStylist.name.split(' ')[0]}</div>
+                        )}
                       </div>
                       <span className="num strong">{money(s.price)}</span>
                       <span className="bk-check" aria-hidden>{on ? <Icon name="check" size={16} strokeWidth={2.4} /> : <Icon name="plus" size={16} />}</span>
@@ -270,35 +322,43 @@ export function BookingFlow(p: BookingPageProps) {
 
         {step === 2 && (
           <section className="stack">
-            <ul className="bk-staff">
+            <ul className="bk-stylists" aria-label="Stylists">
               <li>
-                <button type="button" className={cx('bk-option', staffId === null && 'is-on')} aria-pressed={staffId === null} onClick={() => setStaffId(null)}>
-                  <span className="bk-any" aria-hidden><Icon name="users" size={18} /></span>
-                  <div className="grow"><div className="strong">Any available stylist</div><div className="small muted">Shows the most times</div></div>
-                  <span className="bk-radio" aria-hidden />
-                </button>
-              </li>
-              {eligible.map((s) => (
-                <li key={s.id}>
-                  <button type="button" className={cx('bk-option', staffId === s.id && 'is-on')} aria-pressed={staffId === s.id} onClick={() => setStaffId(s.id)}>
-                    <span className="avatar" style={{ background: s.color }} aria-hidden>{initials(s.name)}</span>
-                    <div className="grow"><div className="strong">{s.name}</div>{s.title && <div className="small muted">{s.title}</div>}</div>
-                    <span className="bk-radio" aria-hidden />
+                <div className={cx('bk-stylist', staffId === null && 'is-on')}>
+                  <button type="button" className="bk-stylist-pick" aria-pressed={staffId === null} onClick={() => setStaffChoice(null)}>
+                    <span className="bk-photo-wrap" aria-hidden>
+                      <span className="bk-any-icon"><Icon name="sparkle" size={24} /></span>
+                      <span className="bk-pick-check"><Icon name="check" size={13} strokeWidth={3} /></span>
+                    </span>
+                    <div className="grow" style={{ minWidth: 0 }}>
+                      <div className="bk-stylist-name">Anyone available</div>
+                      <div className="small muted">Earliest time with any stylist</div>
+                      <NextFreeLine value={nextFor(null)} today={p.today} />
+                    </div>
                   </button>
+                </div>
+              </li>
+              {offered.map((s) => (
+                <li key={s.id}>
+                  <StylistCard s={s} on={staffId === s.id} usual={usual?.id === s.id} next={nextFor(s.id)} today={p.today} onPick={() => setStaffChoice(s.id)} />
                 </li>
               ))}
             </ul>
-            {eligible.length < p.staff.length && <p className="small muted">Only stylists who do all of your chosen services are shown.</p>}
+            {eligible.length < p.staff.length && (
+              <p className="small muted">
+                Showing stylists who do {chosen.length === 1 ? chosen[0].name.toLowerCase() : 'all your chosen services'}.
+              </p>
+            )}
           </section>
         )}
 
         {step === 3 && (
           <section className="stack">
             {timeNotice && <Notice tone="warn">{timeNotice}</Notice>}
-            <DateStrip today={p.today} windowDays={p.salon.bookingWindowDays} hours={p.hours} value={date} onChange={(d) => { setDate(d); setTimeNotice(null); }} />
+            <DateStrip today={p.today} windowDays={p.salon.bookingWindowDays} hours={p.hours} value={date} onChange={(d) => { dateTouched.current = true; setDate(d); setTimeNotice(null); }} />
             <div className="between">
               <h3>{fmtDateLong(date)}</h3>
-              {stylist && <span className="small muted row" style={{ gap: 6 }}><span className="dot" style={{ background: stylist.color }} />{stylist.name}</span>}
+              {stylist && <span className="bk-with-chip small"><Avatar name={stylist.name} color={stylist.color} photo={stylist.photoUrl} size="sm" />{stylist.name}</span>}
             </div>
             {slots === null ? (
               <div className="bk-slots-loading" aria-live="polite"><span className="spinner" aria-hidden /> Finding free times…</div>
@@ -311,9 +371,9 @@ export function BookingFlow(p: BookingPageProps) {
                 <div className="row-wrap" style={{ justifyContent: 'center' }}>
                   {(() => {
                     const next = days.find((d) => d.date > date && d.open);
-                    return next ? <Button size="sm" onClick={() => setDate(next.date)}>Try {fmtDateShort(next.date)}</Button> : null;
+                    return next ? <Button size="sm" onClick={() => { dateTouched.current = true; setDate(next.date); }}>Try {fmtDateShort(next.date)}</Button> : null;
                   })()}
-                  {stylist && <Button size="sm" variant="ghost" onClick={() => setStaffId(null)}>Any stylist</Button>}
+                  {stylist && <Button size="sm" variant="ghost" onClick={() => setStaffChoice(null)}>Anyone available</Button>}
                 </div>
               </div>
             ) : (
@@ -377,7 +437,7 @@ export function BookingFlow(p: BookingPageProps) {
               })}>Add to calendar</Button>
               <Link href={`${p.base}/me`} className="btn btn-ghost btn-block">See all my bookings</Link>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => { setPicked([]); setSlot(null); setResult(null); setStaffId(null); go(1); }}>Book something else</Button>
+            <Button variant="ghost" size="sm" onClick={() => { setPicked([]); setSlot(null); setResult(null); setStaffChoice(p.usualStylistId ?? null); go(1); }}>Book something else</Button>
           </section>
         )}
       </main>
@@ -415,3 +475,47 @@ function Summary({ services, total, when, stylist, minutes, payAtSalon }: { serv
   );
 }
 
+/** "Next free: Today 4:30 PM" under a stylist; a shimmer while it loads, nothing if it couldn't be checked. */
+function NextFreeLine({ value, today }: { value: NextFree | null | undefined; today: string }) {
+  if (value === undefined) return <span className="bk-next is-loading" aria-hidden />;
+  if (value === null) return <div className="bk-next is-none">No free time in the next 7 days</div>;
+  return <div className="bk-next"><Icon name="clock" size={14} />Next free: {fmtNextFree(value, today)}</div>;
+}
+
+function StylistCard({ s, on, usual, next, today, onPick }: {
+  s: PublicStylist; on: boolean; usual: boolean; next: NextFree | null | undefined; today: string; onPick: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const first = s.name.split(' ')[0];
+  const meta = [s.title, experienceLabel(s.yearsExperience)].filter(Boolean).join(' · ');
+  const longBio = !!s.bio && s.bio.length > 90;
+  return (
+    <div className={cx('bk-stylist', on && 'is-on')}>
+      <button type="button" className="bk-stylist-pick" aria-pressed={on} onClick={onPick}>
+        <span className="bk-photo-wrap">
+          <Avatar name={s.name} color={s.color} photo={s.photoUrl} className="bk-stylist-photo" />
+          <span className="bk-pick-check" aria-hidden><Icon name="check" size={13} strokeWidth={3} /></span>
+        </span>
+        <div className="grow" style={{ minWidth: 0 }}>
+          {usual && <span className="bk-usual"><Icon name="star" size={12} strokeWidth={2.2} />Your usual stylist</span>}
+          <div className="bk-stylist-name">{s.name}</div>
+          {meta && <div className="small muted">{meta}</div>}
+          <NextFreeLine value={next} today={today} />
+        </div>
+      </button>
+      {(s.specialties.length > 0 || s.bio) && (
+        <div className="bk-stylist-more">
+          {s.specialties.length > 0 && (
+            <ul className="bk-tags" aria-label={`${first}’s specialties`}>{s.specialties.map((t) => <li key={t}>{t}</li>)}</ul>
+          )}
+          {s.bio && <p className={cx('bk-bio', (open || !longBio) && 'is-open')}>{s.bio}</p>}
+          {longBio && (
+            <button type="button" className="link-btn small bk-bio-toggle" aria-expanded={open} onClick={() => setOpen((x) => !x)}>
+              {open ? 'Show less' : `More about ${first}`}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

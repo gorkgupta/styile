@@ -2,12 +2,13 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Badge, Button, Dialog, Empty, Notice, Sheet, TextArea, useToast } from '@/components/ui/ui';
+import { Avatar, Badge, Button, Dialog, Empty, Notice, Sheet, TextArea, useToast } from '@/components/ui/ui';
 import { Icon } from '@/components/ui/icons';
 import { cancelMyBooking, getMySlots, rescheduleMyBooking } from '@/actions/portal';
 import type { Slot } from '@/lib/availability';
 import { money } from '@/lib/billing';
 import { formatPhone } from '@/lib/phone';
+import { bookAgainHref } from '@/lib/stylists';
 import { dayKeyOf, fmtDateLong, fmtDateShort, fmtTime, localDate, relativeDay } from '@/lib/time';
 import type { ApptStatus, Hours, InvoiceStatus } from '@/lib/types';
 import { STATUS_LABEL } from '@/lib/types';
@@ -20,8 +21,11 @@ export interface PortalSalon {
 }
 export interface PortalVisit {
   id: string; salonId: string; start_at: string; end_at: string; status: ApptStatus;
-  stylist: { name: string; color: string } | null;
+  /** Public fields only. bookable = still offered online, so "Book again with …" can link to them. */
+  stylist: { id: string; name: string; color: string; photoUrl: string | null; bookable: boolean } | null;
   services: { name: string; price: number }[];
+  /** Menu ids of the services (for "Book again"); services removed from the menu are left out. */
+  serviceIds: string[];
   invoiceId: string | null;
 }
 export interface PortalBill { id: string; salonId: string; invoice_no: string; created_at: string; total: number; status: InvoiceStatus }
@@ -112,7 +116,7 @@ export function PortalHome(p: PortalProps) {
                         {fmtDateLong(date)} · {fmtTime(v.start_at, tz)} – {fmtTime(v.end_at, tz)}
                       </div>
                       <div className="small row" style={{ gap: 6 }}>
-                        {v.stylist ? <><span className="dot" style={{ background: v.stylist.color }} /><span className="ink2">with {v.stylist.name}</span></> : <span className="ink2">{salon.name}</span>}
+                        {v.stylist ? <><Avatar name={v.stylist.name} color={v.stylist.color} photo={v.stylist.photoUrl} size="sm" /><span className="ink2">with {v.stylist.name}</span></> : <span className="ink2">{salon.name}</span>}
                         {v.status === 'confirmed' && <Badge tone="peacock">Confirmed</Badge>}
                       </div>
                       <div className="row-wrap pt-actions">
@@ -140,16 +144,25 @@ export function PortalHome(p: PortalProps) {
                     if (!salon) return null;
                     const date = localDate(new Date(v.start_at), salon.timezone);
                     const muted = v.status === 'cancelled' || v.status === 'no_show';
+                    // "Book again with Priya": same stylist and services, straight to their free times.
+                    const again = !muted && salon.bookingEnabled && v.stylist?.bookable && v.serviceIds.length
+                      ? bookAgainHref(p.base, v.stylist.id, v.serviceIds) : null;
                     return (
-                      <li key={v.id} className="row" style={{ gap: 14 }}>
+                      <li key={v.id} className="row pt-past" style={{ gap: 14 }}>
                         <div className="pt-date-chip num"><span>{fmtDateShort(date).split(' ')[1]}</span><span>{fmtDateShort(date).split(' ')[2]}</span></div>
                         <div className="grow" style={{ minWidth: 0 }}>
                           <div className={muted ? 'truncate muted' : 'truncate strong'} style={muted ? { textDecoration: 'line-through' } : undefined}>{v.services.map((s) => s.name).join(', ')}</div>
-                          <div className="small muted truncate">{v.stylist ? v.stylist.name : salon.name}</div>
+                          <div className="small muted pt-stylist">
+                            {v.stylist && <Avatar name={v.stylist.name} color={v.stylist.color} photo={v.stylist.photoUrl} size="sm" />}
+                            <span className="truncate">{v.stylist ? v.stylist.name : salon.name}</span>
+                          </div>
+                          {again && v.stylist && (
+                            <Link className="pt-again small" href={again}><Icon name="calendar" size={14} />Book again with {v.stylist.name.split(' ')[0]}</Link>
+                          )}
                         </div>
                         {muted ? <Badge tone="danger">{STATUS_LABEL[v.status]}</Badge>
                           : v.invoiceId ? <Link className="btn btn-ghost btn-sm" href={`${p.base}/me/bills/${v.invoiceId}`}>Bill</Link>
-                          : salon.bookingEnabled ? <Link className="btn btn-ghost btn-sm" href={bookHref}>Book again</Link> : null}
+                          : salon.bookingEnabled && !again ? <Link className="btn btn-ghost btn-sm" href={bookHref}>Book again</Link> : null}
                       </li>
                     );
                   })}

@@ -26,7 +26,7 @@ export interface LlmResponse { stop_reason: string; content: Block[] }
 
 // ---------- Inputs ----------
 export interface EngineService { id: string; name: string; category: string | null; duration_min: number; price: number; gender: string; online_bookable: boolean }
-export interface EngineStaff { id: string; name: string; title: string | null }
+export interface EngineStaff { id: string; name: string; title: string | null; specialties?: string[] }
 export interface EngineVisit { id: string; start_at: string; staff: string | null; services: string[]; serviceIds: string[]; status: string }
 
 export interface Pending {
@@ -43,7 +43,8 @@ export interface EngineContext {
   salon: { name: string; address: string | null; phone: string | null; tz: string; hours: Hours; instructions: string | null; windowDays: number; bookingUrl: string };
   services: EngineService[];
   staff: EngineStaff[];
-  customer: { name: string; visits: number };
+  /** usualStylist: who they've seen most in the last 12 months (only when that stylist is in `staff`). */
+  customer: { name: string; visits: number; usualStylist?: { id: string; name: string } | null };
   now: Date;
   history: { role: 'user' | 'assistant'; text: string }[];  // oldest first, excluding the current message
   pending: Pending | null;
@@ -100,7 +101,8 @@ export function buildSystemPrompt(ctx: EngineContext): LlmRequest['system'] {
   }).join('\n');
   const menu = services.filter((s) => s.online_bookable)
     .map((s) => `- ${s.id} | ${s.category ?? 'Other'} | ${s.name} | ${s.duration_min} min | ${money(s.price)}${s.gender !== 'unisex' ? ` | ${s.gender} only` : ''}`).join('\n');
-  const team = staff.map((s) => `- ${s.id} | ${s.name}${s.title ? ` (${s.title})` : ''}`).join('\n');
+  const team = staff.map((s) => `- ${s.id} | ${staffLine(s)}`).join('\n');
+  const usual = ctx.customer.usualStylist && staff.some((s) => s.id === ctx.customer.usualStylist!.id) ? ctx.customer.usualStylist : null;
 
   const stable = `You are the WhatsApp assistant for ${salon.name}, a salon${salon.address ? ` at ${salon.address}` : ''}. You help clients book, change and cancel appointments and answer questions about the salon.
 
@@ -115,6 +117,7 @@ How to book:
 - When the client has chosen a service and a time, call propose_booking. The client then gets a Confirm button. Do not say the appointment is booked until it is confirmed.
 - For changes or cancellations, call list_my_appointments first, then propose_reschedule or propose_cancellation.
 - If the client asks for a particular stylist, pass their staff_id; otherwise leave it out and anyone free will be assigned.
+- If the client asks who is good at something ("who does balayage?"), suggest stylists whose specialties match.
 - If the client tells you their name and it differs from what you have, call update_my_name.
 
 Hand over to the team (handoff_to_staff) when: the client asks for a person, has a complaint, asks about refunds or payments, needs bridal/group bookings or anything not on the menu, has a medical or allergy question, or you are unsure. Tell them someone from the salon will reply here.
@@ -126,19 +129,25 @@ ${salon.instructions ? `- Notes from the salon: ${salon.instructions}\n` : ''}
 Menu (id | category | service | duration | price):
 ${menu || '- (no services available for online booking)'}
 
-Team (id | name):
+Team (id | name (title; specialties)):
 ${team || '- (no stylists listed)'}`;
 
   const dynamic = `Now: ${fmtDateShort(today)} ${fmtHhmm(localTime(ctx.now, salon.tz))} (${salon.tz}). Bookings are accepted up to ${salon.windowDays} days ahead.
 Opening hours for the coming days (date = YYYY-MM-DD to use in tools):
 ${days}
 
-Client: ${ctx.customer.name}${ctx.customer.visits ? `, has visited ${ctx.customer.visits} times` : ', first-time client'}.${ctx.pending ? `\nWaiting for the client to confirm: ${ctx.pending.summary.replace(/\n/g, '; ')}` : ''}`;
+Client: ${ctx.customer.name}${ctx.customer.visits ? `, has visited ${ctx.customer.visits} times` : ', first-time client'}.${usual ? `\nTheir usual stylist: ${usual.name} (staff_id ${usual.id}). If they don't say who, offer their usual stylist first (check ${usual.name.split(' ')[0]}'s availability with that staff_id), and mention anyone else free if ${usual.name.split(' ')[0]} isn't.` : ''}${ctx.pending ? `\nWaiting for the client to confirm: ${ctx.pending.summary.replace(/\n/g, '; ')}` : ''}`;
 
   return [
     { type: 'text', text: stable, cache_control: { type: 'ephemeral' } },
     { type: 'text', text: dynamic },
   ];
+}
+
+/** "Meera Iyer (Colour specialist; balayage, global colour)" for the team list in the prompt. */
+export function staffLine(s: EngineStaff): string {
+  const about = [s.title, (s.specialties ?? []).filter(Boolean).join(', ')].filter(Boolean).join('; ');
+  return about ? `${s.name} (${about})` : s.name;
 }
 
 export const TOOLS: LlmRequest['tools'] = [

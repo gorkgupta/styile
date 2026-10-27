@@ -33,6 +33,7 @@ export default async function TeamPage() {
 
   return (
     <TeamScreen
+      salonId={ctx.salon.id}
       staff={staff}
       skills={skillMap}
       services={menu.services}

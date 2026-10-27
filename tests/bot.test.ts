@@ -1,7 +1,7 @@
 // Conversation-flow tests for the WhatsApp assistant with a scripted model and an in-memory salon.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runEngine, toLlmMessages, buildSystemPrompt, type EngineContext, type EngineDeps, type LlmRequest, type LlmResponse, type Block } from '../src/lib/whatsapp/engine';
+import { runEngine, toLlmMessages, buildSystemPrompt, staffLine, type EngineContext, type EngineDeps, type LlmRequest, type LlmResponse, type Block } from '../src/lib/whatsapp/engine';
 import { computeSlots } from '../src/lib/availability';
 import { zonedToUtc } from '../src/lib/time';
 import type { Hours } from '../src/lib/types';
@@ -197,4 +197,46 @@ test('history is shaped for the API and the prompt carries salon facts', () => {
   assert.match(sys[0].text, /Free parking/);
   assert.match(sys[1].text, /Wed, 28 Oct = 2026-10-28 \(tomorrow\): 10:00 AM–8:00 PM/);
   assert.match(sys[1].text, /Sun, 1 Nov = 2026-11-01: closed/);
+});
+
+test('the team list in the prompt carries titles and specialties', () => {
+  const { ctx } = makeSalon();
+  ctx.staff = [
+    { id: 'meera', name: 'Meera Iyer', title: 'Colour specialist', specialties: ['balayage', 'global colour'] },
+    { id: 'arjun', name: 'Arjun', title: 'Barber' },
+    { id: 'sana', name: 'Sana', title: null, specialties: ['gel nails'] },
+    { id: 'kiran', name: 'Kiran', title: null, specialties: [] },
+  ];
+  const sys = buildSystemPrompt(ctx)[0].text;
+  assert.match(sys, /- meera \| Meera Iyer \(Colour specialist; balayage, global colour\)\n/);
+  assert.match(sys, /- arjun \| Arjun \(Barber\)\n/);
+  assert.match(sys, /- sana \| Sana \(gel nails\)\n/);
+  assert.match(sys, /- kiran \| Kiran$/m);
+  assert.equal(staffLine({ id: 'x', name: 'Priya', title: 'Senior stylist', specialties: ['bobs'] }), 'Priya (Senior stylist; bobs)');
+});
+
+test('the prompt offers the client their usual stylist first', () => {
+  const { ctx } = makeSalon();
+  const withUsual = buildSystemPrompt({ ...ctx, customer: { ...ctx.customer, usualStylist: { id: 'priya', name: 'Priya' } } });
+  assert.match(withUsual[1].text, /Their usual stylist: Priya \(staff_id priya\)\. If they don't say who, offer their usual stylist first/);
+  // It is per-client, so it lives in the uncached part of the prompt.
+  assert.doesNotMatch(withUsual[0].text, /usual stylist: Priya/i);
+  assert.doesNotMatch(buildSystemPrompt(ctx)[1].text, /usual stylist/i, 'no usual stylist line for a client without one');
+  const gone = buildSystemPrompt({ ...ctx, customer: { ...ctx.customer, usualStylist: { id: 'left-salon', name: 'Ravi' } } });
+  assert.doesNotMatch(gone[1].text, /Ravi/, 'a usual stylist who is not on the team is not offered');
+});
+
+test('booking with the usual stylist passes their staff_id through to the confirmation', async () => {
+  const { ctx, deps, log } = makeSalon();
+  const s = script(
+    [use('check_availability', { service_ids: ['cut'], date: '2026-10-29', preferred_time: '12:00', staff_id: 'priya' })],
+    [use('propose_booking', { service_ids: ['cut'], date: '2026-10-29', time: '12:00', staff_id: 'priya' })],
+  );
+  deps.llm = s.llm;
+  const usualCtx = { ...ctx, customer: { ...ctx.customer, usualStylist: { id: 'priya', name: 'Priya' } } };
+  const r1 = await runEngine(usualCtx, deps, { text: 'haircut thursday 12' });
+  assert.match(s.seen[0].system[1].text, /usual stylist: Priya/);
+  assert.match((r1.replies[0] as { text: string }).text, /Haircut\* with Priya/);
+  await runEngine({ ...usualCtx, pending: r1.pending }, deps, { text: 'yes' });
+  assert.equal(log[0], `book ${zonedToUtc('2026-10-29', '12:00', TZ).toISOString()} priya`);
 });
