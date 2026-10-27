@@ -18,6 +18,7 @@ export interface Salon {
   trial_ends_at: string | null;
   wa_phone_number_id: string | null; wa_business_account_id: string | null; wa_display_number: string | null;
   wa_bot_enabled: boolean; wa_bot_instructions: string | null;
+  coins_enabled: boolean; coin_packs: CoinPack[];
   created_at: string;
 }
 
@@ -47,6 +48,8 @@ export interface Customer {
   id: string; salon_id: string; name: string; phone: string; email: string | null; gender: 'female' | 'male' | 'other' | null;
   birthday: string | null; notes: string | null; tags: string[]; user_id: string | null; marketing_opt_in: boolean;
   visit_count: number; total_spent: number; last_visit_at: string | null; created_at: string;
+  /** Prepaid coins at this salon (1 coin = ₹1). Changed only by load_coins / adjust_coins / billing. */
+  coin_balance: number;
 }
 
 export interface AppointmentService { id: string; appointment_id: string; service_id: string | null; name: string; price: number; duration_min: number; sort: number }
@@ -77,6 +80,17 @@ export interface InvoiceItem {
 
 export interface Payment { id: string; invoice_id: string; method: PayMethod; amount: number; reference: string | null; created_at: string }
 
+/** A salon's coin pack: the client pays `pay` rupees and gets `coins` coins (coins >= pay; the extra is a bonus). */
+export interface CoinPack { pay: number; coins: number }
+export type CoinKind = 'load' | 'bonus' | 'spend' | 'refund' | 'adjust';
+
+/** One row of the coin ledger. `coins` is signed: + adds to the balance, − takes away. */
+export interface CoinTransaction {
+  id: string; salon_id: string; customer_id: string; kind: CoinKind; coins: number; balance_after: number;
+  amount_paid: number | null; method: PayMethod | null; reference: string | null; invoice_id: string | null;
+  note: string | null; created_at: string;
+}
+
 export interface WaConversation {
   id: string; salon_id: string; customer_id: string | null; wa_id: string; profile_name: string | null;
   bot_paused: boolean; needs_attention: boolean; state: Record<string, unknown>;
@@ -96,6 +110,13 @@ export interface SalonReport {
   by_staff: { staff_id: string; name: string; color: string; revenue: number; services: number; commission: number }[];
   by_service: { name: string; revenue: number; count: number }[];
   by_method: Partial<Record<PayMethod, number>>;
+  /** Money received for coins in the range (an advance, not revenue). */
+  coins_sold: number;
+  coins_bonus: number;
+  /** Coins used on bills in the range, net of refunds from cancelled bills. */
+  coins_redeemed: number;
+  /** All clients' balances right now — prepaid money the salon still owes in services. */
+  coins_outstanding: number;
 }
 
 /** Result shape every server action returns, so forms can show errors inline. */
@@ -108,5 +129,8 @@ export const STATUS_LABEL: Record<ApptStatus, string> = {
 export const SOURCE_LABEL: Record<BookingSource, string> = {
   walk_in: 'Walk-in', phone: 'Phone', online: 'Online', whatsapp: 'WhatsApp', staff: 'Front desk',
 };
-export const METHOD_LABEL: Record<PayMethod, string> = { cash: 'Cash', upi: 'UPI', card: 'Card', wallet: 'Wallet', other: 'Other' };
+export const METHOD_LABEL: Record<PayMethod, string> = { cash: 'Cash', upi: 'UPI', card: 'Card', wallet: 'Coins', other: 'Other' };
+export const COIN_KIND_LABEL: Record<CoinKind, string> = {
+  load: 'Bought coins', bonus: 'Bonus coins', spend: 'Paid a bill', refund: 'Refund (bill cancelled)', adjust: 'Adjustment',
+};
 export const ROLE_LABEL: Record<MemberRole, string> = { owner: 'Owner', manager: 'Manager', receptionist: 'Front desk', stylist: 'Stylist' };

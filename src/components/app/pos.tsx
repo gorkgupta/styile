@@ -9,6 +9,7 @@ import { METHOD_ICON, PAY_METHODS, REF_PLACEHOLDER, parseAmount } from './billin
 import { createInvoice } from '@/actions/billing';
 import type { ClientLite } from '@/actions/appointments';
 import { computeBill, money } from '@/lib/billing';
+import { coinsText, fmtCoins, usableCoins } from '@/lib/coins';
 import type { PayMethod, Service, ServiceCategory, Staff } from '@/lib/types';
 import { METHOD_LABEL } from '@/lib/types';
 
@@ -59,10 +60,13 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
   const [customKind, setCustomKind] = useState<'product' | 'custom'>('product');
   const customNameRef = useRef<HTMLInputElement>(null);
 
+  const coinBalance = Math.max(0, Number(client?.coin_balance ?? 0));
   const firstClient = useRef(true);
   useEffect(() => {
     if (firstClient.current) { firstClient.current = false; return; }
     setSendWa(!!client && salon.waConnected);
+    // Coins belong to the client: a new client without coins can't keep a Coins payment.
+    if (!Number(client?.coin_balance ?? 0)) setPays((rows) => rows.map((p) => (p.method === 'wallet' ? { ...p, method: 'upi' } : p)));
   }, [client, salon.waConnected]);
 
   const bill = useMemo(() => computeBill(
@@ -72,9 +76,15 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
 
   const fixedSum = pays.filter((p) => !p.auto).reduce((s, p) => s + parseAmount(p.amount), 0);
   const remainder = Math.max(0, Math.round((bill.total - fixedSum) * 100) / 100);
-  const payRows = pays.map((p) => (p.auto ? { ...p, amount: remainder ? String(remainder) : '' } : p));
+  // A Coins row that fills the rest never takes more than the client has.
+  const fixedCoins = pays.filter((p) => !p.auto && p.method === 'wallet').reduce((s, p) => s + parseAmount(p.amount), 0);
+  const autoAmount = (p: PayRow) => (p.method === 'wallet' ? usableCoins(coinBalance - fixedCoins, remainder) : remainder);
+  const payRows = pays.map((p) => (p.auto ? { ...p, amount: autoAmount(p) ? String(autoAmount(p)) : '' } : p));
   const paid = Math.round(payRows.reduce((s, p) => s + parseAmount(p.amount), 0) * 100) / 100;
   const balance = Math.round((bill.total - paid) * 100) / 100;
+  const coinsUsed = Math.round(payRows.filter((p) => p.method === 'wallet').reduce((s, p) => s + parseAmount(p.amount), 0) * 100) / 100;
+  const coinsShort = coinsUsed > coinBalance + 0.001;
+  const coinsBlocked = !client ? 'Choose the client to pay with their coins.' : coinBalance <= 0 ? `${client.name.split(' ')[0]} has no coins at your salon.` : null;
   const overDiscount = lines.some((l) => parseAmount(l.discount) > l.qty * l.unitPrice);
   const rates = [...new Set(bill.lines.map((l) => l.gstRate))];
   const halfRate = rates.length === 1 ? `${rates[0] / 2}%` : null;
@@ -120,14 +130,30 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
   const fillRest = (key: string) => setPays2((rows) => rows.map((p) => (p.key === key ? { ...p, auto: true } : { ...p, auto: false })));
   const addPayRow = () => {
     const used = new Set(payRows.map((p) => p.method));
-    const method = PAY_METHODS.find((m) => !used.has(m)) ?? 'cash';
+    const method = PAY_METHODS.find((m) => !used.has(m) && (m !== 'wallet' || !coinsBlocked)) ?? 'cash';
     // Existing rows keep their amounts; the new row picks up the rest once one of them is changed.
     setPays2((rows) => [...rows.map((p) => ({ ...p, auto: false })), freshPay(method)]);
   };
 
+  /** "Use coins": pay as much as the client's coins cover; one other row takes whatever is left. */
+  const useCoins = () => setPays2((rows) => {
+    const others = rows.filter((p) => p.method !== 'wallet');
+    const keyOfRest = others.find((p) => p.auto)?.key ?? others[0]?.key;
+    const fixedOthers = others.filter((p) => p.key !== keyOfRest).reduce((s, p) => s + parseAmount(p.amount), 0);
+    const amount = usableCoins(coinBalance, bill.total - fixedOthers);
+    const rest = Math.round((bill.total - fixedOthers - amount) * 100) / 100;
+    const coinRow: PayRow = { key: nextKey(), method: 'wallet', amount: String(amount), reference: '', auto: false };
+    // Coins cover the whole bill: the row that would take the rest is no longer needed.
+    const kept = others.map((p) => ({ ...p, auto: p.key === keyOfRest })).filter((p) => !(p.key === keyOfRest && rest <= 0));
+    if (rest > 0 && !kept.some((p) => p.auto)) kept.push(freshPay('upi'));
+    return [coinRow, ...kept];
+  });
+
   const save = () => start(async () => {
     setError(null);
     if (!lines.length) return setError('Add at least one service or item to the bill.');
+    if (coinsUsed > 0 && coinsBlocked) return setError(coinsBlocked);
+    if (coinsShort) return setError(`${client?.name.split(' ')[0] ?? 'The client'} has only ${coinsText(coinBalance)}. Lower the Coins amount.`);
     if (overDiscount) return setError('A discount is more than the item price. Fix it to continue.');
     if (balance < 0) return setError(`Payments are ${money(-balance)} more than the bill. Correct the amounts.`);
     const r = await createInvoice({
@@ -147,7 +173,7 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
   });
 
   const saveLabel = `Save bill · ${money(bill.total)}`;
-  const canSave = lines.length > 0 && !overDiscount && balance >= 0;
+  const canSave = lines.length > 0 && !overDiscount && balance >= 0 && !coinsShort;
   const payState = !lines.length ? null
     : balance < 0 ? <span className="small strong danger-text">{money(-balance)} more than the bill</span>
     : balance === 0 ? <span className="small strong success-text">Paid in full</span>
@@ -301,15 +327,33 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
 
             <Panel title="Payment" className="pos-pay" actions={payState}>
               <div className="stack">
+                {client && coinBalance > 0 && (
+                  <div className="coin-strip">
+                    <span className="coin-badge" aria-hidden><Icon name="coins" size={18} /></span>
+                    <div className="grow" style={{ minWidth: 0 }}>
+                      <div className="strong num">Coins: {fmtCoins(coinBalance)} available</div>
+                      <div className="tiny muted num truncate">
+                        {coinsUsed > 0 ? `${fmtCoins(coinsUsed)} on this bill · ${fmtCoins(Math.max(coinBalance - coinsUsed, 0))} left after` : `${client.name.split(' ')[0]}’s balance · 1 coin = ₹1`}
+                      </div>
+                    </div>
+                    {lines.length > 0 && (coinsUsed === 0 || (coinsUsed < Math.min(coinBalance, bill.total) && balance > 0)) && (
+                      <Button size="sm" icon="coins" onClick={useCoins}>Use coins</Button>
+                    )}
+                  </div>
+                )}
                 {payRows.map((p, idx) => (
                   <div key={p.key} className="pay-row">
                     <div className="between">
                       <div className="pay-methods" role="group" aria-label={`Payment ${idx + 1} method`}>
-                        {PAY_METHODS.map((m) => (
-                          <button key={m} type="button" className="chip chip-sm" aria-pressed={p.method === m} onClick={() => setPay(p.key, { method: m })}>
-                            <Icon name={METHOD_ICON[m]} size={14} className="hide-mobile" />{METHOD_LABEL[m]}
-                          </button>
-                        ))}
+                        {PAY_METHODS.map((m) => {
+                          const off = m === 'wallet' && !!coinsBlocked && p.method !== 'wallet';
+                          return (
+                            <button key={m} type="button" className="chip chip-sm" aria-pressed={p.method === m} disabled={off}
+                              title={off ? coinsBlocked ?? undefined : undefined} onClick={() => setPay(p.key, { method: m })}>
+                              <Icon name={METHOD_ICON[m]} size={14} className="hide-mobile" />{METHOD_LABEL[m]}
+                            </button>
+                          );
+                        })}
                       </div>
                       {payRows.length > 1 && <Button size="sm" variant="ghost" icon="x" aria-label="Remove this payment" onClick={() => setPays2((rows) => rows.filter((x) => x.key !== p.key))} />}
                     </div>
@@ -319,9 +363,14 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
                         <input className="input num pay-amount" inputMode="decimal" placeholder="0" value={p.amount}
                           aria-label={`Amount paid by ${METHOD_LABEL[p.method]}`} onChange={(e) => setPayAmount(p.key, e.target.value)} />
                       </div>
-                      {p.method !== 'cash' && (
+                      {p.method !== 'cash' && p.method !== 'wallet' && (
                         <input className="input" placeholder={REF_PLACEHOLDER[p.method]} value={p.reference}
                           aria-label="Payment reference" onChange={(e) => setPay(p.key, { reference: e.target.value })} />
+                      )}
+                      {p.method === 'wallet' && (
+                        <span className={coinsShort ? 'small strong danger-text' : 'small muted num'}>
+                          {coinsShort ? `Only ${coinsText(coinBalance)} available` : coinsBlocked ?? `of ${coinsText(coinBalance)}`}
+                        </span>
                       )}
                       {!p.auto && balance !== 0 && parseAmount(p.amount) + balance > 0 && (
                         <Button size="sm" onClick={() => fillRest(p.key)}>Full amount</Button>
@@ -329,6 +378,7 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
                     </div>
                   </div>
                 ))}
+                {coinsBlocked && <p className="tiny muted row" style={{ gap: 6 }}><Icon name="coins" size={14} />{client ? `${coinsBlocked} Sell coins from their client profile.` : `Coins: ${coinsBlocked.charAt(0).toLowerCase()}${coinsBlocked.slice(1)}`}</p>}
                 {!payRows.length && (
                   <p className="small muted">No payment taken now. The bill will be saved as unpaid and you can record payment later.</p>
                 )}

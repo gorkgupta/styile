@@ -19,6 +19,7 @@ export const handlers: Record<string, (...args: any[]) => any> = {
   updateBilling: () => ok('Billing settings saved'),
   updateBusinessHours: () => ok('Opening hours saved'),
   updateOnlineBooking: () => ok('Online booking settings saved'),
+  updateCoinSettings: (i: { enabled: boolean }) => ok(i.enabled ? 'Coin settings saved' : 'Coin sales turned off. Clients can still use the coins they have.'),
   updateAssistant: (i: { botEnabled: boolean }) => ok(i.botEnabled ? 'Assistant settings saved' : 'Assistant turned off. Chats will wait for your team.'),
   // inbox
   replyToConversation: () => ({ ok: true }),

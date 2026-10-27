@@ -8,6 +8,7 @@ import { Topbar } from './shell';
 import { InvoiceStatusBadge, METHOD_ICON, PAY_METHODS, REF_PLACEHOLDER, parseAmount } from './billing-bits';
 import { addPayment, resendInvoice, voidInvoice } from '@/actions/billing';
 import { amountInWords, money, money2 } from '@/lib/billing';
+import { coinsText, usableCoins } from '@/lib/coins';
 import { formatPhone } from '@/lib/phone';
 import { fmtDateYear } from '@/lib/periods';
 import { fmtTime } from '@/lib/time';
@@ -30,7 +31,7 @@ export interface InvoiceDetailProps {
   invoice: Invoice;
   items: InvoiceItem[];
   payments: Payment[];
-  customer: { id: string; name: string; phone: string; email: string | null } | null;
+  customer: { id: string; name: string; phone: string; email: string | null; coin_balance?: number } | null;
   salon: {
     name: string; legal_name: string | null; gstin: string | null; phone: string | null; email: string | null;
     address: string | null; city: string | null; state: string | null; pincode: string | null; waConnected: boolean;
@@ -63,12 +64,21 @@ export function InvoiceDetail({ invoice: inv, items, payments, customer, salon, 
   const addressLines = [salon.address, [salon.city, salon.state].filter(Boolean).join(', ') + (salon.pincode ? ` – ${salon.pincode}` : '')].filter((x) => x && x.trim());
   const totalQty = items.reduce((s, i) => s + Number(i.qty), 0);
 
-  const openPay = () => { setError(null); setAmount(String(due)); setReference(''); setPayOpen(true); };
+  const coinBalance = Number(customer?.coin_balance ?? 0);
+  const coinsPaid = payments.filter((p) => p.method === 'wallet').reduce((s, p) => s + Number(p.amount), 0);
+  const coinsBlocked = !customer ? 'This bill has no client, so coins can’t be used.' : coinBalance <= 0 ? `${customer.name.split(' ')[0]} has no coins.` : null;
+  const pickMethod = (m: PayMethod) => {
+    setMethod(m);
+    if (m === 'wallet') setAmount(String(usableCoins(coinBalance, due)));
+    else if (method === 'wallet') setAmount(String(due));
+  };
+  const openPay = () => { setError(null); setMethod('upi'); setAmount(String(due)); setReference(''); setPayOpen(true); };
   const savePayment = () => start(async () => {
     setError(null);
     const amt = parseAmount(amount);
     if (!amt) return setError('Enter the amount received.');
     if (amt > due) return setError(`Only ${money(due)} is due on this bill.`);
+    if (method === 'wallet' && amt > coinBalance) return setError(`${customer?.name.split(' ')[0] ?? 'The client'} has only ${coinsText(coinBalance)}.`);
     const r = await addPayment(inv.id, method, amt, reference);
     if (!r.ok) return setError(r.error);
     toast(r.message ?? 'Payment recorded'); setPayOpen(false); router.refresh();
@@ -240,17 +250,21 @@ export function InvoiceDetail({ invoice: inv, items, payments, customer, salon, 
           <span className="label">Paid by</span>
           <div className="row-wrap">
             {PAY_METHODS.map((m) => (
-              <button key={m} type="button" className="chip chip-sm" aria-pressed={method === m} onClick={() => setMethod(m)}>
+              <button key={m} type="button" className="chip chip-sm" aria-pressed={method === m} onClick={() => pickMethod(m)}
+                disabled={m === 'wallet' && !!coinsBlocked} title={m === 'wallet' ? coinsBlocked ?? undefined : undefined}>
                 <Icon name={METHOD_ICON[m]} size={14} />{METHOD_LABEL[m]}
               </button>
             ))}
           </div>
+          {method === 'wallet' ? <span className="hint num">{coinsText(coinBalance)} available · 1 coin = ₹1</span>
+            : coinBalance > 0 ? <span className="hint num">{customer?.name.split(' ')[0]} has {coinsText(coinBalance)}</span>
+            : <span className="hint">{coinsBlocked}</span>}
         </div>
         <div className="field">
           <label htmlFor="pay-amt">Amount</label>
           <div className="prefix-input"><span>₹</span><input id="pay-amt" className="input num" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus /></div>
         </div>
-        {method !== 'cash' && <input className="input" placeholder={REF_PLACEHOLDER[method]} value={reference} onChange={(e) => setReference(e.target.value)} aria-label="Payment reference" />}
+        {method !== 'cash' && method !== 'wallet' && <input className="input" placeholder={REF_PLACEHOLDER[method]} value={reference} onChange={(e) => setReference(e.target.value)} aria-label="Payment reference" />}
         {error && <Notice tone="error">{error}</Notice>}
       </Dialog>
 
@@ -263,7 +277,8 @@ export function InvoiceDetail({ invoice: inv, items, payments, customer, salon, 
           ))}
         </div>
         <TextArea label="Reason" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why is this bill being cancelled?" />
-        {paidTotal > 0 && <p className="tiny muted">{money(paidTotal)} was collected on this bill — refund it separately if needed.</p>}
+        {coinsPaid > 0 && <p className="tiny ink2">{coinsText(coinsPaid)} paid on this bill go back to {customer?.name ?? 'the client'}’s balance.</p>}
+        {paidTotal - coinsPaid > 0 && <p className="tiny muted">{money(paidTotal - coinsPaid)} was collected on this bill — refund it separately if needed.</p>}
         {error && <Notice tone="error">{error}</Notice>}
       </Dialog>
     </>

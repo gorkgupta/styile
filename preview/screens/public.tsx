@@ -10,6 +10,7 @@ import { AdminConsole, type AdminSalonRow } from '../../src/components/admin/con
 import { branch, categories, hours, invoiceItems, invoices, NOW_ISO, payments, salon, services, TODAY } from '../data';
 import { previewSkills, profiledStaff } from '../stylist-data';
 import { toPublicStylist } from '../../src/lib/stylists';
+import { ananyaCoinHistory, ananyaCoins } from '../coins-data';
 
 const staff = profiledStaff;
 
@@ -51,6 +52,7 @@ const portalProps: PortalProps = {
   bills: [
     { id: 'inv-1041', salonId: salon.id, invoice_no: 'GS-01041', created_at: ist('2026-10-02', '16:40'), total: 3800, status: 'paid' },
   ],
+  coins: { balance: ananyaCoins, history: ananyaCoinHistory.map((t) => ({ ...t, reference: null })) },
 };
 
 const inv = invoices[0];
@@ -62,7 +64,7 @@ const customerBill: CustomerBill = {
     ...invoiceItems.map((i) => ({ id: i.id, name: i.name, qty: i.qty, unit_price: i.unit_price, discount: i.discount, gst_rate: i.gst_rate, line_total: i.line_total, stylist: 'Priya Nair' })),
     { id: 'ii-2', name: 'Hair spa', qty: 1, unit_price: 1000, discount: 100, gst_rate: 18, line_total: 900, stylist: 'Priya Nair' },
   ],
-  payments: [...payments.map((x) => ({ method: x.method, amount: x.amount })), { method: 'cash', amount: 900 }],
+  payments: [...payments.map((x) => ({ method: x.method, amount: x.amount })), { method: 'wallet', amount: 900 }],
 };
 
 const daysFromNow = (n: number) => new Date(new Date(NOW_ISO).getTime() + n * 86400000).toISOString();

@@ -49,6 +49,17 @@ function makeSalon() {
     reschedule: async (id, start) => { const b = busy.find((x) => x.id === id)!; b.start = new Date(start); b.end = new Date(new Date(start).getTime() + 3600000); log.push(`move ${id}`); return { start, stylist: 'Priya' }; },
     rename: async (n) => { log.push(`rename ${n}`); },
     handoff: async (r) => { log.push(`handoff ${r}`); },
+    coins: async () => ({
+      balance: 1250,
+      recent: [
+        { created_at: '2026-10-26T08:00:00Z', kind: 'spend', coins: -400, balance_after: 1250, bill: 'GS-01041' },
+        { created_at: '2026-10-20T08:00:00Z', kind: 'bonus', coins: 150, balance_after: 1650, bill: null },
+        { created_at: '2026-10-20T08:00:00Z', kind: 'load', coins: 1500, balance_after: 1500, bill: null },
+        { created_at: '2026-10-01T08:00:00Z', kind: 'adjust', coins: -100, balance_after: 0, bill: null },
+        { created_at: '2026-09-21T08:00:00Z', kind: 'refund', coins: 100, balance_after: 100, bill: 'GS-01002' },
+        { created_at: '2026-09-20T08:00:00Z', kind: 'spend', coins: -100, balance_after: 0, bill: 'GS-01002' },
+      ],
+    }),
   };
   return { ctx, deps, busy, log };
 }
@@ -239,4 +250,23 @@ test('booking with the usual stylist passes their staff_id through to the confir
   assert.match((r1.replies[0] as { text: string }).text, /Haircut\* with Priya/);
   await runEngine({ ...usualCtx, pending: r1.pending }, deps, { text: 'yes' });
   assert.equal(log[0], `book ${zonedToUtc('2026-10-29', '12:00', TZ).toISOString()} priya`);
+});
+
+test('my_coins tells the client their coin balance at this salon', async () => {
+  const { ctx, deps, log } = makeSalon();
+  const s = script([use('my_coins', {})], [{ type: 'text', text: 'You have 1,250 coins at Glow Studio — worth ₹1,250 on your next bill.' }]);
+  deps.llm = s.llm;
+  const r = await runEngine(ctx, deps, { text: 'mere kitne coins bache hain?' });
+  assert.ok(s.seen[0].tools.some((t) => t.name === 'my_coins'), 'tool offered to the model');
+  assert.match(s.seen[0].system[0].text, /call my_coins/);
+  const res = JSON.parse(((s.seen[1].messages.at(-1)!.content as Block[])[0] as { content: string }).content);
+  assert.equal(res.balance, 1250);
+  assert.equal(res.balance_text, '1,250 coins (worth ₹1,250 on bills at Glow Studio)');
+  assert.equal(res.recent.length, 5, 'last 5 transactions only');
+  assert.deepEqual(res.recent[0], { date: 'Mon, 26 Oct', what: 'Paid a bill', coins: '−400', balance_after: '1,250', bill: 'GS-01041' });
+  assert.equal(res.recent[1].coins, '+150');
+  assert.equal(r.pending, null);
+  assert.equal(r.handedOff, false, 'checking coins is not a hand-off');
+  assert.equal(log.length, 0);
+  assert.match((r.replies[0] as { text: string }).text, /1,250 coins/);
 });

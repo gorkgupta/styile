@@ -8,7 +8,9 @@
 import type { Slot } from '../availability';
 import { nearestSlots } from '../availability';
 import { addDays, dayKeyOf, fmtDateShort, fmtHhmm, isValidDateStr, localDate, localTime, zonedToUtc } from '../time';
-import type { Hours } from '../types';
+import type { CoinKind, Hours } from '../types';
+import { COIN_KIND_LABEL } from '../types';
+import { fmtCoins } from '../coins';
 import type { OutgoingMessage } from './cloud-api-payload';
 
 // ---------- LLM protocol (Anthropic Messages API shapes) ----------
@@ -28,6 +30,8 @@ export interface LlmResponse { stop_reason: string; content: Block[] }
 export interface EngineService { id: string; name: string; category: string | null; duration_min: number; price: number; gender: string; online_bookable: boolean }
 export interface EngineStaff { id: string; name: string; title: string | null; specialties?: string[] }
 export interface EngineVisit { id: string; start_at: string; staff: string | null; services: string[]; serviceIds: string[]; status: string }
+/** A row of the client's coin ledger at this salon (coins: + added, − used). */
+export interface EngineCoinTx { created_at: string; kind: CoinKind; coins: number; balance_after: number; bill: string | null }
 
 export interface Pending {
   type: 'book' | 'cancel' | 'reschedule';
@@ -59,6 +63,8 @@ export interface EngineDeps {
   reschedule(appointmentId: string, start: string, staffId: string | null): Promise<{ start: string; stylist: string }>;
   rename(name: string): Promise<void>;
   handoff(reason: string): Promise<void>;
+  /** The client's coin balance at this salon and their latest coin transactions (newest first). */
+  coins(): Promise<{ balance: number; recent: EngineCoinTx[] }>;
 }
 
 export interface Inbound { text: string; buttonId?: string | null }
@@ -120,7 +126,9 @@ How to book:
 - If the client asks who is good at something ("who does balayage?"), suggest stylists whose specialties match.
 - If the client tells you their name and it differs from what you have, call update_my_name.
 
-Hand over to the team (handoff_to_staff) when: the client asks for a person, has a complaint, asks about refunds or payments, needs bridal/group bookings or anything not on the menu, has a medical or allergy question, or you are unsure. Tell them someone from the salon will reply here.
+Coins: clients can prepay at ${salon.name} and get coins (1 coin = ₹1, often with a bonus) to pay their bills here. When the client asks how many coins they have, their balance, wallet or recent coin use, call my_coins and answer with the balance. Coins are bought at the front desk (cash, UPI or card) and can only be used at ${salon.name}; you can't add coins or take payments in this chat.
+
+Hand over to the team (handoff_to_staff) when: the client asks for a person, has a complaint, asks about refunds or payments (other than checking their coins), needs bridal/group bookings or anything not on the menu, has a medical or allergy question, or you are unsure. Tell them someone from the salon will reply here.
 
 Salon details:
 - Phone: ${salon.phone ? '+' + salon.phone : 'not listed'}
@@ -198,6 +206,11 @@ export const TOOLS: LlmRequest['tools'] = [
     name: 'update_my_name',
     description: "Save the client's name when they tell you.",
     input_schema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
+  },
+  {
+    name: 'my_coins',
+    description: "The client's coin balance at this salon (prepaid, 1 coin = ₹1) and their last 5 coin transactions.",
+    input_schema: { type: 'object', properties: {} },
   },
   {
     name: 'handoff_to_staff',
@@ -419,6 +432,20 @@ async function runTool(use: ToolUseBlock, ctx: EngineContext, deps: EngineDeps, 
       if (name.length < 2) throw new Error('Name looks too short');
       await deps.rename(name);
       return { result: { ok: true }, renamed: true };
+    }
+
+    case 'my_coins': {
+      const { balance, recent } = await deps.coins();
+      return {
+        result: {
+          balance, balance_text: `${fmtCoins(balance)} coins (worth ${money(balance)} on bills at ${ctx.salon.name})`,
+          recent: recent.slice(0, 5).map((t) => ({
+            date: fmtDateShort(localDate(new Date(t.created_at), tz)), what: COIN_KIND_LABEL[t.kind],
+            coins: `${t.coins > 0 ? '+' : '−'}${fmtCoins(Math.abs(t.coins))}`, balance_after: fmtCoins(t.balance_after), ...(t.bill ? { bill: t.bill } : {}),
+          })),
+          note: balance > 0 ? 'Coins are used at the salon when paying the bill — the client just asks at the front desk.' : 'No coins yet. Coins are bought at the front desk.',
+        },
+      };
     }
 
     case 'handoff_to_staff': {

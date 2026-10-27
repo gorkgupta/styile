@@ -19,7 +19,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
     db.from('invoice_items').select('*').eq('invoice_id', invoice.id).order('sort'),
     db.from('payments').select('*').eq('invoice_id', invoice.id).order('created_at'),
     invoice.customer_id
-      ? db.from('customers').select('id, name, phone, email').eq('id', invoice.customer_id).eq('salon_id', ctx.salon.id).maybeSingle()
+      ? db.from('customers').select('id, name, phone, email, coin_balance').eq('id', invoice.customer_id).eq('salon_id', ctx.salon.id).maybeSingle()
       : Promise.resolve({ data: null }),
     db.from('staff').select('id, name').eq('salon_id', ctx.salon.id),
   ]);
@@ -33,7 +33,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
       invoice={invoice}
       items={(items.data ?? []) as InvoiceItem[]}
       payments={(payments.data ?? []) as Payment[]}
-      customer={(customer.data ?? null) as { id: string; name: string; phone: string; email: string | null } | null}
+      customer={(customer.data ?? null) as { id: string; name: string; phone: string; email: string | null; coin_balance: number } | null}
       salon={{
         name: s.name, legal_name: s.legal_name, gstin: s.gstin, phone: s.phone, email: s.email,
         address: s.address, city: s.city, state: s.state, pincode: s.pincode, waConnected: !!s.wa_phone_number_id,

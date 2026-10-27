@@ -8,6 +8,7 @@ import { findSiteSalon } from '@/lib/salon-site';
 import { salonSiteBase } from '@/lib/site';
 import { PortalHome, type PortalBill, type PortalVisit } from '@/components/portal/portal';
 import { shownOnline } from '@/lib/stylists';
+import type { CoinRow } from '@/components/app/coin-history';
 import type { ApptStatus, InvoiceStatus } from '@/lib/types';
 
 export const metadata: Metadata = { title: 'Your bookings' };
@@ -38,18 +39,21 @@ export default async function Page({ params }: { params: Promise<{ slug: string 
   await supabase.rpc('claim_customer_profiles');
 
   // Read as the client (RLS: their own rows only), and only at this salon.
-  const { data: customerRows } = await supabase.from('customers').select('id, name').eq('user_id', user.id).eq('salon_id', site.id);
-  const customers = (customerRows ?? []) as { id: string; name: string }[];
+  const { data: customerRows } = await supabase.from('customers').select('id, name, coin_balance').eq('user_id', user.id).eq('salon_id', site.id);
+  const customers = (customerRows ?? []) as { id: string; name: string; coin_balance: number }[];
   const customerIds = customers.map((c) => c.id);
 
   const nowIso = new Date().toISOString();
-  const [appts, invoices] = customerIds.length ? await Promise.all([
+  const [appts, invoices, coinTx] = customerIds.length ? await Promise.all([
     supabase.from('appointments')
       .select('id, salon_id, start_at, end_at, status, invoice_id, staff_id, services:appointment_services(name, price, sort, service_id)')
       .in('customer_id', customerIds).eq('salon_id', site.id).neq('status', 'waiting').order('start_at', { ascending: false }).limit(60),
     supabase.from('invoices').select('id, salon_id, invoice_no, created_at, total, status')
       .in('customer_id', customerIds).eq('salon_id', site.id).order('created_at', { ascending: false }).limit(30),
-  ]) : [{ data: [] }, { data: [] }];
+    // Coins bought here can only be spent here, so only this salon's ledger is shown.
+    supabase.from('coin_transactions').select('id, kind, coins, balance_after, amount_paid, method, invoice_id, note, created_at, invoice:invoices(invoice_no)')
+      .in('customer_id', customerIds).eq('salon_id', site.id).order('created_at', { ascending: false }).limit(10),
+  ]) : [{ data: [] }, { data: [] }, { data: [] }];
 
   // Clients can't read staff rows (phones, commission); stylist names and photos for their own visits come from the
   // service role, and only public fields are passed on.
@@ -79,6 +83,13 @@ export default async function Page({ params }: { params: Promise<{ slug: string 
     .filter((b) => b.status !== 'void')
     .map((b) => ({ id: b.id, salonId: b.salon_id, invoice_no: b.invoice_no, created_at: b.created_at, total: Number(b.total), status: b.status }));
 
+  type RawCoin = Omit<CoinRow, 'invoice_no' | 'reference'> & { invoice: { invoice_no: string } | null };
+  const coinHistory: CoinRow[] = ((coinTx.data ?? []) as unknown as RawCoin[]).map(({ invoice, ...t }) => ({
+    ...t, reference: null, coins: Number(t.coins), balance_after: Number(t.balance_after),
+    amount_paid: t.amount_paid == null ? null : Number(t.amount_paid), invoice_no: invoice?.invoice_no ?? null,
+  }));
+  const coinBalance = customers.reduce((s, c) => s + Number(c.coin_balance ?? 0), 0);
+
   const meta = (user.user_metadata ?? {}) as { full_name?: string };
   const name = customers.find((c) => c.name && c.name !== phone)?.name ?? meta.full_name ?? '';
 
@@ -90,6 +101,7 @@ export default async function Page({ params }: { params: Promise<{ slug: string 
         hours: site.hours, bookingWindowDays: site.bookingWindowDays, bookingEnabled: site.bookingEnabled,
       }}
       upcoming={upcoming} past={past} bills={bills}
+      coins={{ balance: coinBalance, history: coinHistory }}
     />
   );
 }

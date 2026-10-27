@@ -6,10 +6,11 @@ import { Badge, Button, Notice, Panel, SelectField, Switch, TextArea, TextField,
 import { Icon, type IconName } from '@/components/ui/icons';
 import { Topbar } from './shell';
 import { HoursEditor } from './hours-editor';
-import { updateAssistant, updateBilling, updateBusinessHours, updateOnlineBooking, updateSalonProfile } from '@/actions/settings';
+import { updateAssistant, updateBilling, updateBusinessHours, updateCoinSettings, updateOnlineBooking, updateSalonProfile } from '@/actions/settings';
 import { formatPhone } from '@/lib/phone';
 import { PLAN_LABEL, PLAN_STATUS_LABEL, planById } from '@/lib/plans';
 import { money } from '@/lib/billing';
+import { checkCoinPacks, DEFAULT_COIN_PACKS, fmtCoins, MAX_COIN_PACKS } from '@/lib/coins';
 import type { ActionResult, Hours, Salon } from '@/lib/types';
 
 export interface SettingsProps {
@@ -28,6 +29,7 @@ const STATES = ['Andaman and Nicobar Islands', 'Andhra Pradesh', 'Arunachal Prad
 const SECTIONS: { id: string; label: string; icon: IconName }[] = [
   { id: 'profile', label: 'Salon profile', icon: 'store' },
   { id: 'billing', label: 'Billing & GST', icon: 'receipt' },
+  { id: 'coins', label: 'Coins', icon: 'coins' },
   { id: 'hours', label: 'Opening hours', icon: 'clock' },
   { id: 'booking', label: 'Online booking', icon: 'link' },
   { id: 'whatsapp', label: 'WhatsApp', icon: 'whatsapp' },
@@ -106,6 +108,7 @@ export function SettingsScreen({ salon, hours, supportEmail }: SettingsProps) {
           <div className="stack-lg settings-main">
             <ProfileSection salon={salon} />
             <BillingSection salon={salon} />
+            <CoinsSection salon={salon} />
             <HoursSection hours={hours} />
             <BookingSection salon={salon} />
             <WhatsAppSection salon={salon} supportEmail={supportEmail} />
@@ -185,6 +188,86 @@ function BillingSection({ salon }: { salon: Salon }) {
             onChange={(e) => setPrefix(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
             hint={<>Next bill: <span className="num strong ink2">{(prefix || 'INV')}-{String(salon.next_invoice_no).padStart(5, '0')}</span></>} />
         </div>
+      </div>
+    </Section>
+  );
+}
+
+interface PackDraft { key: number; pay: string; coins: string }
+let packKey = 0;
+const toDraft = (p: { pay: number; coins: number }): PackDraft => ({ key: ++packKey, pay: String(p.pay), coins: String(p.coins) });
+const whole = (v: string) => (v.trim() === '' ? NaN : Number(v.replace(/[,\s₹]/g, '')));
+
+function CoinsSection({ salon }: { salon: Salon }) {
+  const [enabled, setEnabled] = useState(salon.coins_enabled ?? true);
+  const [packs, setPacks] = useState<PackDraft[]>(() => (salon.coin_packs ?? DEFAULT_COIN_PACKS).map(toDraft));
+  const { pending, error, run } = useSave();
+  const set = (key: number, patch: Partial<PackDraft>) => setPacks((cur) => cur.map((p) => (p.key === key ? { ...p, ...patch } : p)));
+  const add = () => setPacks((cur) => {
+    const last = cur[cur.length - 1];
+    const pay = last && Number.isFinite(whole(last.pay)) ? whole(last.pay) * 2 : 1000;
+    return [...cur, { key: ++packKey, pay: String(pay), coins: String(Math.round(pay * 1.1)) }];
+  });
+  const save = () => run(async () => {
+    const parsed = packs.map((p) => ({ pay: whole(p.pay), coins: whole(p.coins) }));
+    const checked = checkCoinPacks(parsed);
+    if (!checked.ok) return { ok: false, error: checked.error };
+    return updateCoinSettings({ enabled, packs: checked.packs });
+  });
+
+  return (
+    <Section id="coins" title="Coins" description="Clients prepay at your desk and pay for visits from their balance. 1 coin = ₹1."
+      footer={<SaveBar pending={pending} error={error} onSave={save} />}>
+      <div className="stack">
+        <div className="setting-row">
+          <div className="grow">
+            <div className="strong">Sell coins at the desk</div>
+            <div className="small muted">
+              {enabled
+                ? `Front desk sells coins for cash, UPI or card from a client’s profile. Coins can only be used at ${salon.name}, and they don’t expire.`
+                : 'Off — no new coins can be sold. Clients can still use the coins they already have.'}
+            </div>
+          </div>
+          <Switch checked={enabled} onChange={setEnabled} label={<span className="sr-only">Sell coins at the desk</span>} />
+        </div>
+
+        <div className="field">
+          <span className="label">Coin packs</span>
+          <span className="hint">Offer a bonus on bigger top-ups. Front desk can sell these packs, or any amount without a bonus; only owners and managers can give a custom bonus.</span>
+          <div className="coin-pack-rows">
+            {packs.map((p, i) => {
+              const pay = whole(p.pay), coins = whole(p.coins);
+              const ok = Number.isInteger(pay) && pay > 0 && Number.isInteger(coins);
+              const bad = ok && (coins < pay || coins > pay * 2);
+              const bonus = ok && !bad ? coins - pay : 0;
+              return (
+                <div key={p.key} className="coin-pack-row">
+                  <div className="prefix-input coin-pack-pay-in">
+                    <span><span className="hide-mobile">Pay&nbsp;</span>₹</span>
+                    <input className="input num" inputMode="numeric" value={p.pay} aria-label={`Pack ${i + 1}: client pays (₹)`}
+                      onChange={(e) => set(p.key, { pay: e.target.value.replace(/[^\d]/g, '') })} />
+                  </div>
+                  <Icon name="arrowRight" size={16} className="muted coin-pack-arrow" />
+                  <div className="prefix-input coin-pack-coins">
+                    <input className="input num" inputMode="numeric" value={p.coins} aria-label={`Pack ${i + 1}: coins added`} aria-invalid={bad || undefined}
+                      onChange={(e) => set(p.key, { coins: e.target.value.replace(/[^\d]/g, '') })} />
+                    <span>coins</span>
+                  </div>
+                  <span className={`small nowrap coin-pack-note ${bad ? 'danger-text' : bonus > 0 ? 'success-text' : 'muted'}`}>
+                    {!ok ? '' : coins < pay ? `At least ${fmtCoins(pay)}` : coins > pay * 2 ? 'Bonus over 100%' : bonus > 0 ? `+${fmtCoins(bonus)} bonus · ${Math.round((bonus / pay) * 100)}%` : 'No bonus'}
+                  </span>
+                  <Button size="sm" variant="ghost" icon="trash" className="coin-pack-del" aria-label={`Remove pack ${i + 1}`} onClick={() => setPacks((cur) => cur.filter((x) => x.key !== p.key))} />
+                </div>
+              );
+            })}
+            {!packs.length && <p className="small muted">No packs — the desk sells any amount, 1 coin per rupee.</p>}
+          </div>
+          {packs.length < MAX_COIN_PACKS && <div><Button size="sm" icon="plus" onClick={add}>Add pack</Button></div>}
+        </div>
+
+        <Notice>
+          Selling coins gives the client a <strong>coins receipt, not a tax invoice</strong> — it’s an advance. GST is charged on the bill when the coins are used to pay. Confirm the GST treatment with your CA.
+        </Notice>
       </div>
     </Section>
   );

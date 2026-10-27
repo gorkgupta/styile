@@ -14,6 +14,8 @@ import type { ApptStatus, Hours, InvoiceStatus } from '@/lib/types';
 import { STATUS_LABEL } from '@/lib/types';
 import { createClient } from '@/lib/supabase/client';
 import { DateStrip, SlotGrid } from '@/components/public/date-strip';
+import { CoinHistoryList, type CoinRow } from '@/components/app/coin-history';
+import { coinsText, fmtCoins } from '@/lib/coins';
 
 export interface PortalSalon {
   id: string; name: string; slug: string; city: string | null; phone: string | null;
@@ -42,6 +44,8 @@ export interface PortalProps {
   upcoming: PortalVisit[];
   past: PortalVisit[];
   bills: PortalBill[];
+  /** The client's coins at this salon (spendable only here). */
+  coins?: { balance: number; history: CoinRow[] };
 }
 
 /** Simple top bar shared by the client portal pages. */
@@ -86,6 +90,20 @@ export function PortalHome(p: PortalProps) {
           <h1>{first ? `Hi ${first}` : 'Your bookings'}</h1>
           <p className="muted">Your appointments and bills at {p.salon.name}.</p>
         </div>
+
+        {p.known && p.coins && (p.coins.balance > 0 || p.coins.history.length > 0) && (
+          <section className="pt-coins" aria-label="Your coins">
+            <span className="pt-coins-icon" aria-hidden><Icon name="coins" size={24} /></span>
+            <div className="grow" style={{ minWidth: 0 }}>
+              <div className="pt-coins-title">You have <span className="num">{coinsText(p.coins.balance)}</span> at {p.salon.name}</div>
+              <div className="small pt-coins-sub">
+                {p.coins.balance > 0
+                  ? <>Worth <span className="num">{money(p.coins.balance)}</span> — use them on your next bill. Just tell the front desk.</>
+                  : 'Top up at the front desk to pay for your next visits with coins.'}
+              </div>
+            </div>
+          </section>
+        )}
 
         {!p.known ? (
           <div className="panel">
@@ -196,6 +214,16 @@ export function PortalHome(p: PortalProps) {
                 </ul>
               ) : <p className="muted small">Bills from your visits will appear here.</p>}
             </section>
+
+            {p.coins && p.coins.history.length > 0 && (
+              <section className="stack">
+                <div className="between"><h2>Coin history</h2><span className="small muted num">Balance {fmtCoins(p.coins.balance)}</span></div>
+                <div className="panel">
+                  <CoinHistoryList rows={p.coins.history.slice(0, 5)} tz={p.salon.timezone} billHref={(id) => `${p.base}/me/bills/${id}`} showReference={false} />
+                </div>
+                <p className="tiny muted">Coins can be used only at {p.salon.name}. 1 coin = ₹1.</p>
+              </section>
+            )}
 
             <section className="pt-salon">
               <div className="grow" style={{ minWidth: 0 }}>
