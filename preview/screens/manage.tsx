@@ -1,10 +1,11 @@
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { ServicesScreen } from '../../src/components/app/services';
 import { InboxScreen } from '../../src/components/app/inbox';
 import { ReportsScreen } from '../../src/components/app/reports';
 import { SettingsScreen } from '../../src/components/app/settings';
 import { TeamScreen } from '../../src/components/app/team';
-import { branch, categories, conversations, messages, NOW_ISO, report, salon, services, staff, TODAY, TZ } from '../data';
+import { branch, categories, conversations, messages, NOW_ISO, report, salon, services, TODAY, TZ } from '../data';
+import { portraitOf, previewSkills, profiledStaff as staff } from '../stylist-data';
 
 // A couple of extra rows so the screens show archived / online-off / uncategorised states.
 const menuServices = [
@@ -15,8 +16,10 @@ const menuServices = [
 
 const teamStaff = [
   ...staff,
+  { ...staff[0], id: 'st-kiran', name: 'Kiran Rao', title: 'Trainee stylist', color: '#2F6DB5', show_on_booking: false, user_id: null, phone: null, years_experience: 1, specialties: [], bio: null,
+    photo_url: portraitOf({ bg1: '#DCE8F7', bg2: '#B7CDEB', skin: '#A86F4F', neck: '#935E42', hair: '#1E1612', top: '#2F6DB5' }) },
   { ...staff[1], id: 'st-ravi', name: 'Ravi Kumar', title: 'Junior stylist', color: '#2F6DB5', active: false, user_id: null, phone: null },
-  { ...staff[0], id: 'st-desk', name: 'Asha Rao', title: 'Owner', color: '#9A6B00', bookable: false, user_id: 'u-asha', commission_pct: 0, phone: null },
+  { ...staff[0], id: 'st-desk', name: 'Asha Rao', title: 'Owner', color: '#9A6B00', bookable: false, photo_url: null, bio: null, specialties: [], user_id: 'u-asha', commission_pct: 0, phone: null },
 ];
 const members = [
   { user_id: 'u-asha', role: 'owner' as const, staff_id: 'st-desk', name: 'Asha Rao', email: 'asha@glowstudio.in' },
@@ -35,19 +38,24 @@ const inbox = (selectedId: string | null) => (
     messages={inboxMessages.filter((m) => m.conversation_id === selectedId)} />
 );
 
+const team = () => (
+  <TeamScreen salonId={salon.id} staff={teamStaff} services={services} categories={categories} branchHours={branch.business_hours} members={members}
+    skills={previewSkills} canManageAccess currentUserId="u-asha" />
+);
+
+/** Preview only: opens one team member's sheet so it can be screenshotted. */
+function OpenRow({ index, children }: { index: number; children: ReactNode }) {
+  useEffect(() => { document.querySelectorAll<HTMLButtonElement>('.staff-row')[index]?.click(); }, [index]);
+  return <>{children}</>;
+}
+
 export const screens: Record<string, { title: string; render: () => ReactNode }> = {
   '/app/services': {
     title: 'Services',
     render: () => <ServicesScreen services={menuServices} categories={categories} defaultGstRate={salon.default_gst_rate} pricesIncludeTax={salon.prices_include_tax} />,
   },
-  '/app/staff': {
-    title: 'Team',
-    render: () => (
-      <TeamScreen staff={teamStaff} services={services} categories={categories} branchHours={branch.business_hours} members={members}
-        skills={{ 'st-arjun': ['s-cut-m', 's-beard', 's-blow'], 'st-sana': ['s-cleanup', 's-facial', 's-mani', 's-pedi'] }}
-        canManageAccess currentUserId="u-asha" />
-    ),
-  },
+  '/app/staff': { title: 'Team', render: () => team() },
+  '/app/staff/edit': { title: 'Team — edit a stylist’s booking page profile', render: () => <OpenRow index={2}>{team()}</OpenRow> },
   '/app/settings': {
     title: 'Settings',
     render: () => <SettingsScreen salon={salon} hours={branch.business_hours} supportEmail="support@styile.com" />,

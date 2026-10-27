@@ -5,8 +5,9 @@ import { BookingError, createBooking, findOrCreateCustomer, getAvailability, loa
 import { notifyBookingConfirmed } from '@/lib/whatsapp/outbox';
 import { fail } from '@/lib/actions';
 import { normalizePhone } from '@/lib/phone';
-import { fmtDateTime, isValidDateStr } from '@/lib/time';
-import type { Slot } from '@/lib/availability';
+import { addDays, dayKeyOf, fmtDateTime, isValidDateStr, localDate } from '@/lib/time';
+import { qualifiedStaff, type Slot } from '@/lib/availability';
+import { earliestByStylist, shownOnline, type NextFreeResult } from '@/lib/stylists';
 import type { ActionResult } from '@/lib/types';
 
 // Public booking page (/s/[slug]). Anonymous visitors have no table access, so these actions use the
@@ -70,9 +71,40 @@ export async function getPublicSlots(slug: string, serviceIds: string[], date: s
     const salonId = await publicSalonId(slug);
     const db = createAdminClient();
     const catalog = await loadCatalog(db, salonId);
-    if (staff && !catalog.staff.some((s) => s.id === staff && s.bookable)) return { ok: false, error: 'That stylist is not taking bookings. Pick another.' };
+    if (staff && !catalog.staff.some((s) => s.id === staff && shownOnline(s))) return { ok: false, error: 'That stylist is not taking bookings. Pick another.' };
     const slots = await getAvailability(db, catalog, { serviceIds: ids, date, staffId: staff, onlineOnly: true });
     return { ok: true, data: slots };
+  } catch (e) { return failBooking(e); }
+}
+
+/** How far ahead "Next free" looks on the stylist step. */
+const NEXT_FREE_DAYS = 7;
+
+/**
+ * Earliest free time for the chosen services with each stylist who can do them all (and with anyone), for the
+ * stylist step of the booking page. One availability run per open day covers the whole team; stops early once
+ * everyone has a time, and never looks more than 7 days (or the salon's booking window) ahead.
+ */
+export async function getStylistNextFree(slug: string, serviceIds: string[]): Promise<ActionResult<NextFreeResult>> {
+  try {
+    const ids = cleanIds(serviceIds);
+    const salonId = await publicSalonId(slug);
+    const db = createAdminClient();
+    const catalog = await loadCatalog(db, salonId);
+    const offered = qualifiedStaff(catalog.staff, catalog.skills, ids).filter(shownOnline).map((s) => s.id);
+    if (!offered.length) return { ok: true, data: { byStaff: {}, any: null } };
+
+    const now = new Date();
+    const today = localDate(now, catalog.salon.timezone);
+    const lastDay = Math.min(NEXT_FREE_DAYS - 1, catalog.salon.booking_window_days);
+    const days: { date: string; slots: Slot[] }[] = [];
+    for (let i = 0; i <= lastDay; i++) {
+      const date = addDays(today, i);
+      if (!catalog.branch.business_hours[dayKeyOf(date)]?.length) continue; // closed: no need to ask the database
+      days.push({ date, slots: await getAvailability(db, catalog, { serviceIds: ids, date, onlineOnly: true, now }) });
+      if (Object.keys(earliestByStylist(days, offered).byStaff).length === offered.length) break;
+    }
+    return { ok: true, data: earliestByStylist(days, offered) };
   } catch (e) { return failBooking(e); }
 }
 
@@ -95,7 +127,7 @@ export async function bookOnline(input: BookOnlineInput): Promise<ActionResult<B
     const salonId = await publicSalonId(input.slug);
     const db = createAdminClient();
     const catalog = await loadCatalog(db, salonId);
-    if (staffId && !catalog.staff.some((s) => s.id === staffId && s.bookable)) return { ok: false, error: 'That stylist is not taking bookings. Pick another.' };
+    if (staffId && !catalog.staff.some((s) => s.id === staffId && shownOnline(s))) return { ok: false, error: 'That stylist is not taking bookings. Pick another.' };
 
     const customer = await findOrCreateCustomer(db, salonId, phone, name);
     await db.from('customers').update({ user_id: user.id }).eq('id', customer.id).is('user_id', null);

@@ -7,6 +7,7 @@ import { normalizePhone } from '@/lib/phone';
 import { findSiteSalon } from '@/lib/salon-site';
 import { salonSiteBase } from '@/lib/site';
 import { PortalHome, type PortalBill, type PortalVisit } from '@/components/portal/portal';
+import { shownOnline } from '@/lib/stylists';
 import type { ApptStatus, InvoiceStatus } from '@/lib/types';
 
 export const metadata: Metadata = { title: 'Your bookings' };
@@ -15,7 +16,7 @@ export const dynamic = 'force-dynamic';
 interface ApptRow {
   id: string; salon_id: string; start_at: string; end_at: string; status: ApptStatus; invoice_id: string | null;
   staff_id: string | null;
-  services: { name: string; price: number; sort: number }[];
+  services: { name: string; price: number; sort: number; service_id: string | null }[];
 }
 
 // A client's bookings, bills and coins at ONE salon: the salon whose site this is.
@@ -44,24 +45,30 @@ export default async function Page({ params }: { params: Promise<{ slug: string 
   const nowIso = new Date().toISOString();
   const [appts, invoices] = customerIds.length ? await Promise.all([
     supabase.from('appointments')
-      .select('id, salon_id, start_at, end_at, status, invoice_id, staff_id, services:appointment_services(name, price, sort)')
+      .select('id, salon_id, start_at, end_at, status, invoice_id, staff_id, services:appointment_services(name, price, sort, service_id)')
       .in('customer_id', customerIds).eq('salon_id', site.id).neq('status', 'waiting').order('start_at', { ascending: false }).limit(60),
     supabase.from('invoices').select('id, salon_id, invoice_no, created_at, total, status')
       .in('customer_id', customerIds).eq('salon_id', site.id).order('created_at', { ascending: false }).limit(30),
   ]) : [{ data: [] }, { data: [] }];
 
-  // Clients can't read staff rows (phones, commission); stylist names for their own visits come from the service role.
+  // Clients can't read staff rows (phones, commission); stylist names and photos for their own visits come from the
+  // service role, and only public fields are passed on.
   const apptRows = (appts.data ?? []) as unknown as ApptRow[];
   const staffIds = [...new Set(apptRows.map((a) => a.staff_id).filter((x): x is string => !!x))];
-  const stylists = new Map<string, { name: string; color: string }>();
+  const stylists = new Map<string, NonNullable<PortalVisit['stylist']>>();
   if (staffIds.length) {
-    const { data: staffRows } = await createAdminClient().from('staff').select('id, name, color').in('id', staffIds).eq('salon_id', site.id);
-    for (const s of (staffRows ?? []) as { id: string; name: string; color: string }[]) stylists.set(s.id, { name: s.name, color: s.color });
+    const { data: staffRows } = await createAdminClient().from('staff')
+      .select('id, name, color, photo_url, active, bookable, show_on_booking').in('id', staffIds).eq('salon_id', site.id);
+    type Row = { id: string; name: string; color: string; photo_url: string | null; active: boolean; bookable: boolean; show_on_booking: boolean };
+    for (const s of (staffRows ?? []) as Row[]) {
+      stylists.set(s.id, { id: s.id, name: s.name, color: s.color, photoUrl: s.photo_url, bookable: shownOnline(s) });
+    }
   }
 
   const visits: PortalVisit[] = apptRows.map((a) => ({
     id: a.id, salonId: a.salon_id, start_at: a.start_at, end_at: a.end_at, status: a.status, invoiceId: a.invoice_id,
     stylist: (a.staff_id && stylists.get(a.staff_id)) || null, services: [...(a.services ?? [])].sort((x, y) => x.sort - y.sort).map((s) => ({ name: s.name, price: Number(s.price) })),
+    serviceIds: [...(a.services ?? [])].sort((x, y) => x.sort - y.sort).map((s) => s.service_id).filter((x): x is string => !!x),
   }));
   const now = Date.now();
   const upcoming = visits.filter((v) => ['booked', 'confirmed'].includes(v.status) && new Date(v.start_at).getTime() > now).reverse();

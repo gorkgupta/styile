@@ -26,12 +26,12 @@ export const salon: Salon = {
 
 export const branch: Branch = { id: 'br-1', salon_id: salon.id, name: 'Indiranagar', address: salon.address, phone: salon.phone, is_default: true, business_hours: hours };
 
-export const staff: Staff[] = [
+export const staff: Staff[] = ([
   { id: 'st-priya', salon_id: salon.id, branch_id: 'br-1', user_id: 'u-priya', name: 'Priya Nair', phone: '919900011111', title: 'Senior stylist', color: '#7A3FB8', commission_pct: 12, working_hours: null, bookable: true, active: true, sort: 1 },
   { id: 'st-arjun', salon_id: salon.id, branch_id: 'br-1', user_id: null, name: 'Arjun Das', phone: '919900022222', title: 'Barber', color: '#0F6E73', commission_pct: 10, working_hours: { tue: [['12:00', '20:00']] }, bookable: true, active: true, sort: 2 },
   { id: 'st-meera', salon_id: salon.id, branch_id: 'br-1', user_id: 'u-meera', name: 'Meera Iyer', phone: '919900033333', title: 'Colour specialist', color: '#C2541B', commission_pct: 15, working_hours: null, bookable: true, active: true, sort: 3 },
   { id: 'st-sana', salon_id: salon.id, branch_id: 'br-1', user_id: null, name: 'Sana Sheikh', phone: '919900044444', title: 'Skin & nails', color: '#B43D6B', commission_pct: 10, working_hours: null, bookable: true, active: true, sort: 4 },
-];
+] as Omit<Staff, 'photo_url' | 'bio' | 'specialties' | 'years_experience' | 'show_on_booking'>[]).map((s) => ({ photo_url: null, bio: null, specialties: [], years_experience: null, show_on_booking: true, ...s }));
 
 export const categories: ServiceCategory[] = [
   { id: 'c-hair', salon_id: salon.id, name: 'Hair', sort: 1 },

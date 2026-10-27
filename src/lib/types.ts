@@ -27,6 +27,10 @@ export interface Staff {
   id: string; salon_id: string; branch_id: string | null; user_id: string | null; name: string; phone: string | null;
   title: string | null; color: string; commission_pct: number; working_hours: Hours | null;
   bookable: boolean; active: boolean; sort: number;
+  /** Public profile shown when clients choose a stylist (0006_stylist_profiles.sql). */
+  photo_url: string | null; bio: string | null; specialties: string[]; years_experience: number | null;
+  /** false = not offered to clients online (booking page, WhatsApp); the front desk can still book them. */
+  show_on_booking: boolean;
 }
 
 export interface Member { salon_id: string; user_id: string; role: MemberRole; staff_id: string | null; created_at: string }

@@ -26,11 +26,11 @@ async function myAppointment(appointmentId: unknown) {
   const userId = await currentUserId();
   const db = createAdminClient();
   const { data } = await db.from('appointments')
-    .select('id, salon_id, customer_id, customer:customers(user_id)')
+    .select('id, salon_id, customer_id, staff_id, customer:customers(user_id)')
     .eq('id', appointmentId).maybeSingle();
   const owner = (data?.customer as { user_id: string | null } | null)?.user_id;
   if (!data || owner !== userId) throw new BookingError('Booking not found');
-  return { db, salonId: data.salon_id as string, customerId: data.customer_id as string, id: data.id as string };
+  return { db, salonId: data.salon_id as string, customerId: data.customer_id as string, id: data.id as string, staffId: (data.staff_id as string | null) ?? null };
 }
 
 function failPortal(e: unknown): ActionResult<never> {
@@ -70,7 +70,7 @@ export async function getMySlots(appointmentId: string, date: string): Promise<A
     const serviceIds = ((lines ?? []) as { service_id: string | null }[]).map((l) => l.service_id).filter((x): x is string => !!x);
     if (!serviceIds.length) return { ok: false, error: 'This booking can’t be moved online. Please message the salon.' };
     const catalog = await loadCatalog(appt.db, appt.salonId);
-    const slots = await getAvailability(appt.db, catalog, { serviceIds, date, excludeAppointmentId: appt.id, onlineOnly: true });
+    const slots = await getAvailability(appt.db, catalog, { serviceIds, date, excludeAppointmentId: appt.id, onlineOnly: true, keepStaffId: appt.staffId });
     return { ok: true, data: slots };
   } catch (e) { return failPortal(e); }
 }
