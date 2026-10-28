@@ -69,7 +69,7 @@ export function Receipt({ width, invoice: inv, items, payments, customer, salon,
         const qty = Number(it.qty);
         const meta = [
           narrow || qty > 1 ? `${qty} × ${amt(it.unit_price)}` : '',
-          Number(it.discount) > 0 ? `less ${amt(it.discount)}` : '',
+          Number(it.discount) > 0 ? `less ${amt(it.discount)}${it.discount_note ? ` (${it.discount_note})` : ''}` : it.discount_note === 'Package' ? 'From package' : '',
           doc.showTax ? `${it.code ? `${it.kind === 'product' ? 'HSN' : 'SAC'} ${it.code} · ` : ''}GST ${Number(it.gst_rate)}%` : '',
           !narrow && it.staff_id && staffNames[it.staff_id] ? staffNames[it.staff_id] : '',
         ].filter(Boolean);

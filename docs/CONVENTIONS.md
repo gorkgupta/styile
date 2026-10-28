@@ -5,7 +5,8 @@ Styile is a multi-tenant salon management SaaS for India: Next.js 15 (App Router
 ## Layout
 
 ```
-supabase/migrations/   schema (0001), row level security (0002), RPC functions (0003), salon addresses (0004), coins (0005), stylist profiles (0006), GST modes (0007), payment types (0008), receipts & UPI (0010)
+supabase/migrations/   schema (0001), row level security (0002), RPC functions (0003), salon addresses (0004), coins (0005), stylist profiles (0006), GST modes (0007), payment types (0008), day close (0009), receipts & UPI (0010),
+                       packages & memberships (0011 adds the 'package' payment type, 0012 the rest)
 src/app/               routes. /app/* = salon dashboard, /s/[slug] = salon site (booking page; /s/[slug]/me = client portal), /admin = platform console.
                        In production the middleware serves /s/<slug>/* at <slug>.styile.com/* (see src/lib/tenant.ts); link with
                        salonUrl(slug, path) from '@/lib/tenant', or with the `base` prop inside salon-site pages — never hardcode /s/ or /me.
@@ -13,7 +14,7 @@ src/actions/           'use server' modules — every mutation goes through one 
 src/components/ui/     primitives: ui.tsx (Button, TextField, SelectField, TextArea, Switch, SearchInput, Badge, StatusBadge, Avatar,
                        Panel, Stat, Empty, Notice, Segmented, Sheet, Dialog, ToastProvider/useToast, SubmitButton), icons.tsx (<Icon name=…/>)
 src/components/app/    dashboard screens. shell.tsx has AppShell + <Topbar title subtitle actions back/>
-src/lib/               types.ts (row types + labels), time.ts (time zones/formatting), billing.ts (computeBill, money, amountInWords), gst.ts (GST modes, bill types, rates, states), upi.ts (UPI QR payload), qr.ts (vendored QR encoder, MIT),
+src/lib/               types.ts (row types + labels), time.ts (time zones/formatting), billing.ts (computeBill, money, amountInWords), packages.ts (packages & membership cards), gst.ts (GST modes, bill types, rates, states), upi.ts (UPI QR payload), qr.ts (vendored QR encoder, MIT),
                        availability.ts (slot engine), booking.ts (server booking service), coins.ts (coin packs/formatting), phone.ts, permissions.ts (can(role, perm)),
                        context.ts (getSalonContext/requirePermission), queries.ts, actions.ts (fail/must/errorMessage),
                        supabase/{server,client,admin}.ts, whatsapp/{cloud-api,outbox}.ts, env.ts
@@ -67,3 +68,8 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ q
 * `next/link`, `next/navigation`, `@/lib/supabase/client` are shimmed.
 * Register screens in `preview/screens/<area>.tsx` as `'/app/route': { title, render: () => <Screen …mock props/> }`. Routes under `/app` are wrapped in the AppShell automatically. Dynamic routes may use `[id]` in the key.
 * Sample data lives in `preview/data.ts` (salon, staff, services, customers, appointments, invoices, conversations, report). Add what you need to your own screens file rather than editing shared data.
+
+## Enum values
+
+`ALTER TYPE … ADD VALUE` can't be used in the transaction that adds it. Put it alone in its own migration file that sorts
+before the file that uses it (e.g. 0011_pay_method_package.sql, then 0012_packages_memberships.sql).

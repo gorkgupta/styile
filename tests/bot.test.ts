@@ -60,6 +60,13 @@ function makeSalon() {
         { created_at: '2026-09-20T08:00:00Z', kind: 'spend', coins: -100, balance_after: 0, bill: 'GS-01002' },
       ],
     }),
+    packages: async () => ({
+      packages: [
+        { name: '6 Facials', expires_on: '2027-04-26', items: [{ name: 'Facial', left: 4, total: 6 }] },
+        { name: 'Bridal glow pack', expires_on: '2026-11-05', items: [{ name: 'Clean-up', left: 1, total: 3 }, { name: 'Facial', left: 2, total: 2 }] },
+      ],
+      membership: { name: 'Glow Card', starts_on: '2026-03-01', ends_on: '2027-02-28', service_discount_pct: 10, product_discount_pct: 5 },
+    }),
   };
   return { ctx, deps, busy, log };
 }
@@ -269,4 +276,38 @@ test('my_coins tells the client their coin balance at this salon', async () => {
   assert.equal(r.handedOff, false, 'checking coins is not a hand-off');
   assert.equal(log.length, 0);
   assert.match((r.replies[0] as { text: string }).text, /1,250 coins/);
+});
+
+test('my_packages tells the client the sessions left and their membership card', async () => {
+  const { ctx, deps, log } = makeSalon();
+  const s = script([use('my_packages', {})], [{ type: 'text', text: 'You have 4 facials left in your 6 Facials package — use them by 26 Apr 2027.' }]);
+  deps.llm = s.llm;
+  const r = await runEngine(ctx, deps, { text: 'how many facials left in my package?' });
+  assert.ok(s.seen[0].tools.some((t) => t.name === 'my_packages'), 'tool offered to the model');
+  assert.match(s.seen[0].system[0].text, /call my_packages/);
+  const res = JSON.parse(((s.seen[1].messages.at(-1)!.content as Block[])[0] as { content: string }).content);
+  assert.equal(res.packages.length, 2);
+  assert.deepEqual(res.packages[0].sessions_left, ['Facial: 4 of 6 left']);
+  assert.equal(res.packages[0].use_by, '26 Apr 2027');
+  assert.equal(res.packages[1].use_by, '5 Nov', 'no year for this year');
+  assert.equal(res.packages[0].total_left, '4 sessions');
+  assert.equal(res.packages[0].ends_soon, undefined, 'no nudge for a package ending months away');
+  assert.deepEqual(res.packages[1].sessions_left, ['Clean-up: 1 of 3 left', 'Facial: 2 of 2 left']);
+  assert.match(res.packages[1].ends_soon, /^9 days left/, 'a package ending soon is flagged so the assistant can suggest booking');
+  assert.deepEqual(res.membership, { name: 'Glow Card', discount: '10% off services · 5% off products', valid_till: '28 Feb 2027' });
+  assert.equal(r.handedOff, false, 'checking a package is not a hand-off');
+  assert.equal(r.pending, null);
+  assert.equal(log.length, 0);
+});
+
+test('my_packages with nothing bought says where to buy', async () => {
+  const { ctx, deps } = makeSalon();
+  deps.packages = async () => ({ packages: [], membership: null });
+  const s = script([use('my_packages', {})], [{ type: 'text', text: 'You don’t have a package yet.' }]);
+  deps.llm = s.llm;
+  await runEngine(ctx, deps, { text: 'koi package hai mera?' });
+  const res = JSON.parse(((s.seen[1].messages.at(-1)!.content as Block[])[0] as { content: string }).content);
+  assert.deepEqual(res.packages, []);
+  assert.equal(res.membership, null);
+  assert.match(res.note, /front desk/);
 });

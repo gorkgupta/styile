@@ -202,6 +202,7 @@ export function InvoiceDetail({ invoice: inv, items, payments, customer, salon, 
                   <td>
                     <div className="strong">{it.name}</div>
                     {it.staff_id && staffNames[it.staff_id] && <div className="tiny muted">by {staffNames[it.staff_id]}</div>}
+                    {it.discount_note && <div className="tiny strong line-note">{it.discount_note === 'Package' ? 'From package — paid with the package' : `${it.discount_note} member discount`}</div>}
                     <div className="tiny muted show-narrow num">
                       {money2(it.unit_price)} each{Number(it.discount) > 0 ? ` · −${money2(it.discount)} discount` : ''}
                       {doc.showTax ? ` · GST ${Number(it.gst_rate)}%${it.code ? ` · ${it.kind === 'product' ? 'HSN' : 'SAC'} ${it.code}` : ''}` : ''}

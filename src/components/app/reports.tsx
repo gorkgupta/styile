@@ -116,6 +116,7 @@ export function ReportsScreen({ report, previous, range, today, salonName, gstMo
                 <MethodsPanel byMethod={report.by_method ?? {}} />
                 {expenses && <ExpensesReportPanel report={report} expenses={expenses} range={range} />}
                 <CoinsReportPanel report={report} />
+                <PackagesReportPanel report={report} />
               </div>
             </div>
 
@@ -376,9 +377,9 @@ function SourcesPanel({ bySource }: { bySource: Partial<Record<BookingSource, nu
   );
 }
 
-const METHOD_ORDER: PayMethod[] = ['upi', 'upi_bhutan', 'card', 'cash', 'cash_nu', 'wallet', 'other'];
+const METHOD_ORDER: PayMethod[] = ['upi', 'upi_bhutan', 'card', 'cash', 'cash_nu', 'wallet', 'package', 'other'];
 const METHOD_COLOR: Record<PayMethod, string> = {
-  upi: '#0F6E73', upi_bhutan: '#4FA89B', card: '#7A3FB8', cash: '#C2541B', cash_nu: '#9A6B00', wallet: '#2F6DB5', other: '#7A7486',
+  upi: '#0F6E73', upi_bhutan: '#4FA89B', card: '#7A3FB8', cash: '#C2541B', cash_nu: '#9A6B00', wallet: '#2F6DB5', package: '#B43D6B', other: '#7A7486',
 };
 
 function MethodsPanel({ byMethod }: { byMethod: Partial<Record<PayMethod, number>> }) {
@@ -420,6 +421,31 @@ function CoinsReportPanel({ report }: { report: SalonReport }) {
           <div><div className="small muted">Outstanding</div><div className="coin-report-value num">{money(Math.round(owed))}</div><div className="tiny muted">All clients’ balances now</div></div>
         </div>
         <p className="tiny muted">Coins sold are advances, not revenue — bills paid with coins already count in revenue and GST. Outstanding is services you still owe clients.</p>
+      </div>
+    </Panel>
+  );
+}
+
+function PackagesReportPanel({ report }: { report: SalonReport }) {
+  const sold = n(report.packages_sold), soldAmt = n(report.packages_sold_amount), used = n(report.package_sessions_redeemed), usedValue = n(report.package_redeemed_value);
+  const owedSessions = n(report.package_sessions_outstanding), owed = n(report.package_outstanding_value);
+  const cards = n(report.memberships_sold), cardAmt = n(report.memberships_amount), memberDisc = n(report.member_discounts), members = n(report.active_members);
+  if (!sold && !used && !owedSessions && !cards && !memberDisc && !members) return null;
+  return (
+    <Panel title={<h2 className="row" style={{ gap: 8 }}><Icon name="box" size={18} className="pkg-title-icon" />Packages & memberships</h2>}
+      actions={<Link className="btn btn-ghost btn-sm" href="/app/packages">Menu</Link>}>
+      <div className="stack">
+        <div className="coin-report">
+          <div><div className="small muted">Packages sold</div><div className="coin-report-value num">{money(Math.round(soldAmt))}</div>
+            <div className="tiny muted">{sold} package{sold === 1 ? '' : 's'}{n(report.packages_refunded) ? ` · ${money(Math.round(n(report.packages_refunded)))} handed back` : ''}</div></div>
+          <div><div className="small muted">Sessions used</div><div className="coin-report-value num">{used.toLocaleString('en-IN')}</div><div className="tiny muted num">Worth {money(Math.round(usedValue))} on bills</div></div>
+          <div><div className="small muted">Sessions still owed</div><div className="coin-report-value num">{owedSessions.toLocaleString('en-IN')}</div><div className="tiny muted num">Worth {money(Math.round(owed))} today</div></div>
+          <div><div className="small muted">Membership cards</div><div className="coin-report-value num">{cards}</div>
+            <div className="tiny muted num">{cards ? `${money(Math.round(cardAmt))} in fees · ` : ''}{members} member{members === 1 ? '' : 's'} now</div></div>
+        </div>
+        <p className="tiny muted">
+          Package sales are advances, not revenue — bills paid from packages already count in revenue and GST. Member discounts given: <span className="num">{money(Math.round(memberDisc))}</span>.
+        </p>
       </div>
     </Panel>
   );

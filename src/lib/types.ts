@@ -6,8 +6,12 @@ export type { BillType, GstMode } from './gst';
 export type MemberRole = 'owner' | 'manager' | 'receptionist' | 'stylist';
 export type ApptStatus = 'waiting' | 'booked' | 'confirmed' | 'checked_in' | 'in_service' | 'completed' | 'cancelled' | 'no_show';
 export type BookingSource = 'walk_in' | 'phone' | 'online' | 'whatsapp' | 'staff';
-/** cash_nu = Bhutanese Ngultrum notes (at par), upi_bhutan = a Bhutanese bank app paying the salon's UPI QR (0008). */
-export type PayMethod = 'cash' | 'upi' | 'card' | 'wallet' | 'other' | 'cash_nu' | 'upi_bhutan';
+/**
+ * cash_nu = Bhutanese Ngultrum notes (at par), upi_bhutan = a Bhutanese bank app paying the salon's UPI QR (0008).
+ * package = a session from a package the client bought earlier (0011); added by the database from package lines, never
+ * chosen at the desk. Coins ('wallet') and package sessions are not money received on the day of the bill.
+ */
+export type PayMethod = 'cash' | 'upi' | 'card' | 'wallet' | 'other' | 'cash_nu' | 'upi_bhutan' | 'package';
 export type ReceiptSize = 'a4' | '80' | '58';
 export type InvoiceStatus = 'paid' | 'partial' | 'unpaid' | 'void';
 export type Hours = Partial<Record<'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun', [string, string][]>>;
@@ -95,13 +99,21 @@ export interface Invoice {
   client_gstin: string | null; client_address: string | null;
   /** Composition salons: the 6% they pay themselves on this bill (estimate). */
   composition_tax: number;
+  /** The membership card whose discount this bill got (0012). */
+  client_membership_id?: string | null;
 }
 
 export interface InvoiceItem {
-  id: string; invoice_id: string; kind: 'service' | 'product' | 'custom'; service_id: string | null; staff_id: string | null;
+  id: string; invoice_id: string; kind: 'service' | 'product' | 'custom' | 'membership'; service_id: string | null; staff_id: string | null;
   name: string; qty: number; unit_price: number; discount: number; gst_rate: number; taxable: number; tax: number; line_total: number;
   /** SAC (services) or HSN (products). */
   code: string | null;
+  /** A session taken from a client's package (0012): priced at the session's value, paid with 'package'. */
+  client_package_id?: string | null;
+  /** Part of `discount` that is the client's member discount (worked out by the database). */
+  member_discount?: number;
+  /** "Member 10%" or "Package", printed under the line. */
+  discount_note?: string | null;
 }
 
 export interface Payment { id: string; invoice_id: string; method: PayMethod; amount: number; reference: string | null; created_at: string }
@@ -150,6 +162,49 @@ export interface SalonReport {
   coins_redeemed: number;
   /** All clients' balances right now — prepaid money the salon still owes in services. */
   coins_outstanding: number;
+  /** Packages sold in the range and the money taken for them (an advance, not revenue); money handed back on cancelled ones. */
+  packages_sold: number; packages_sold_amount: number; packages_refunded: number;
+  /** Sessions used on bills in the range, and their value (paid with 'package'). */
+  package_sessions_redeemed: number; package_redeemed_value: number;
+  /** Sessions clients can still use today, and what they are worth — services the salon still owes. */
+  package_sessions_outstanding: number; package_outstanding_value: number;
+  /** Membership cards sold in the range (their fees are bills, already in revenue), discounts members got, members today. */
+  memberships_sold: number; memberships_amount: number; member_discounts: number; active_members: number;
+}
+
+// ---------------------------------------------------------------------------
+// Packages and membership cards (0012_packages_memberships.sql)
+// ---------------------------------------------------------------------------
+/** A package on the salon's menu, e.g. "6 Facials" for ₹9,000, valid 180 days. */
+export interface ServicePackage {
+  id: string; salon_id: string; name: string; description: string | null; price: number; validity_days: number;
+  active: boolean; sort: number; created_at: string;
+  items: { service_id: string; sessions: number }[];
+}
+/** A membership card on the salon's menu, e.g. "Glow Card": ₹299 a year, 10% off services. */
+export interface MembershipPlan {
+  id: string; salon_id: string; name: string; description: string | null; fee: number; validity_days: number;
+  service_discount_pct: number; product_discount_pct: number; active: boolean; sort: number; created_at: string;
+}
+export type ClientPackageStatus = 'active' | 'used' | 'expired' | 'cancelled';
+export interface ClientPackageItem {
+  id: string; service_id: string | null; name: string; sessions_total: number; sessions_used: number;
+  /** What one session is worth on a bill. */
+  unit_value: number; sort: number;
+}
+/** A package a client bought: a snapshot, with its sale receipt (not a tax invoice). */
+export interface ClientPackage {
+  id: string; salon_id: string; customer_id: string; package_id: string | null; name: string; price: number; validity_days: number;
+  purchased_at: string; expires_on: string; status: ClientPackageStatus;
+  receipt_no: string; amount_paid: number; method: PayMethod; reference: string | null; note: string | null;
+  cancelled_at: string | null; cancel_reason: string | null; refund_amount: number | null; refund_method: PayMethod | null;
+  items: ClientPackageItem[];
+}
+export interface ClientMembership {
+  id: string; salon_id: string; customer_id: string; plan_id: string | null; name: string; fee: number;
+  service_discount_pct: number; product_discount_pct: number; starts_on: string; ends_on: string;
+  status: 'active' | 'expired' | 'cancelled'; invoice_id: string | null; created_at: string;
+  cancelled_at: string | null; cancel_reason: string | null;
 }
 
 /** Result shape every server action returns, so forms can show errors inline. */
@@ -163,10 +218,15 @@ export const SOURCE_LABEL: Record<BookingSource, string> = {
   walk_in: 'Walk-in', phone: 'Phone', online: 'Online', whatsapp: 'WhatsApp', staff: 'Front desk',
 };
 export const METHOD_LABEL: Record<PayMethod, string> = {
-  cash: 'Cash', upi: 'UPI', card: 'Card', wallet: 'Coins', other: 'Other', cash_nu: 'Cash (Nu)', upi_bhutan: 'UPI (Bhutan)',
+  cash: 'Cash', upi: 'UPI', card: 'Card', wallet: 'Coins', other: 'Other', cash_nu: 'Cash (Nu)', upi_bhutan: 'UPI (Bhutan)', package: 'Package',
 };
-/** Every payment type, in the order the desk sees them. */
+/** Paid from something bought earlier (coins, a package): not money received on the day of the bill. */
+export const PREPAID_METHODS: PayMethod[] = ['wallet', 'package'];
+export const isPrepaidMethod = (m: string | null | undefined) => (PREPAID_METHODS as string[]).includes(m ?? '');
+/** Every payment type the desk can pick, in the order the desk sees them ('package' is added by the database). */
 export const ALL_PAY_METHODS: PayMethod[] = ['cash', 'upi', 'card', 'cash_nu', 'upi_bhutan', 'wallet', 'other'];
+/** Money only: how a client can pay for a package (or have money handed back). */
+export const MONEY_METHODS: PayMethod[] = ['cash', 'upi', 'card', 'cash_nu', 'upi_bhutan', 'other'];
 export const DEFAULT_PAY_METHODS: PayMethod[] = ['cash', 'upi', 'card', 'wallet'];
 export const COIN_KIND_LABEL: Record<CoinKind, string> = {
   load: 'Bought coins', bonus: 'Bonus coins', spend: 'Paid a bill', refund: 'Refund (bill cancelled)', adjust: 'Adjustment',

@@ -8,6 +8,7 @@ import { Topbar } from './shell';
 import { ClientFormSheet, isVip, TagBadges } from './customers';
 import { InvoiceStatusBadge } from './billing-bits';
 import { CoinsPanel, type CoinsPanelProps } from './coins';
+import { MembershipPanel, PackagesPanel, type ClientBenefitsProps } from './client-packages';
 import { deleteCustomer, saveCustomerNotes } from '@/actions/customers';
 import { money } from '@/lib/billing';
 import { formatPhone } from '@/lib/phone';
@@ -35,9 +36,11 @@ export interface CustomerProfileProps {
   canBill: boolean;
   /** Coins panel; null when the viewer's role can't see coin history (stylists). */
   coins?: Omit<CoinsPanelProps, 'customer' | 'tz'> | null;
+  /** Packages and membership cards (everyone sees them; selling depends on the role). */
+  benefits?: Omit<ClientBenefitsProps, 'customer' | 'tz'> | null;
 }
 
-export function CustomerProfile({ customer: c, appointments, invoices, staff, today, nowIso, tz, canDelete, canBill, coins }: CustomerProfileProps) {
+export function CustomerProfile({ customer: c, appointments, invoices, staff, today, nowIso, tz, canDelete, canBill, coins, benefits }: CustomerProfileProps) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
@@ -66,7 +69,8 @@ export function CustomerProfile({ customer: c, appointments, invoices, staff, to
   })();
   const coinBalance = Number(c.coin_balance ?? 0);
   const hasCoinHistory = (coins?.history.length ?? 0) > 0 || coinBalance > 0;
-  const hasHistory = appointments.length > 0 || (invoices?.length ?? 0) > 0 || hasCoinHistory;
+  const hasPackages = (benefits?.packages.length ?? 0) > 0 || (benefits?.memberships.length ?? 0) > 0;
+  const hasHistory = appointments.length > 0 || (invoices?.length ?? 0) > 0 || hasCoinHistory || hasPackages;
   const shownAppts = tab === 'upcoming' ? upcoming : past;
   const bday = c.birthday ? new Intl.DateTimeFormat('en-IN', { timeZone: 'UTC', day: 'numeric', month: 'long' }).format(new Date(`${c.birthday}T00:00:00Z`)) : null;
   const bdaySoon = c.birthday ? (() => {
@@ -190,6 +194,12 @@ export function CustomerProfile({ customer: c, appointments, invoices, staff, to
           </div>
 
           <div className="stack">
+            {benefits && (benefits.plans.length > 0 || benefits.memberships.length > 0) && (
+              <MembershipPanel {...benefits} customer={{ id: c.id, name: c.name, coinBalance }} tz={tz} />
+            )}
+            {benefits && (benefits.menu.length > 0 || benefits.packages.length > 0 || benefits.canManage) && (
+              <PackagesPanel {...benefits} customer={{ id: c.id, name: c.name, coinBalance }} tz={tz} />
+            )}
             {coins && (coins.salon.enabled || hasCoinHistory) && (
               <CoinsPanel {...coins} customer={{ id: c.id, name: c.name, balance: coinBalance }} tz={tz} />
             )}
@@ -229,6 +239,7 @@ export function CustomerProfile({ customer: c, appointments, invoices, staff, to
               appointments.length ? `${appointments.length} appointment${appointments.length > 1 ? 's' : ''}` : '',
               invoices?.length ? `${invoices.length} bill${invoices.length > 1 ? 's' : ''}` : '',
               hasCoinHistory ? 'coin history' : '',
+              hasPackages ? 'packages or a membership card' : '',
             ].filter(Boolean).join(' and ')} on record, so they can’t be deleted — that history is needed for your records and GST. Edit their details instead.</Notice>
           : <p className="small ink2">This permanently removes their contact details and notes.</p>}
         {deleteError && <Notice tone="error">{deleteError}</Notice>}

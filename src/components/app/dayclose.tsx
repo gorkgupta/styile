@@ -12,7 +12,7 @@ import { closeDay, reopenDay } from '@/actions/dayclose';
 import { money } from '@/lib/billing';
 import { fmtCoins } from '@/lib/coins';
 import {
-  cashDifference, fmtNu, isCoins, methodLabel, methodRows, PAID_FROM_LABEL, showsNu, sortMethods,
+  cashDifference, fmtNu, isCoins, isPrepaid, methodLabel, methodRows, PAID_FROM_LABEL, showsNu, sortMethods,
   type CashCheck, type DayClose, type DaySummary,
 } from '@/lib/dayclose';
 import { addDays, fmtDateLong, fmtDateShort, fmtTime, localDate } from '@/lib/time';
@@ -39,7 +39,7 @@ export interface DayCloseProps {
   expenseMinDate?: string;
 }
 
-const METHOD_ICON: Record<string, IconName> = { cash: 'cash', cash_nu: 'cash', upi: 'upi', upi_bhutan: 'upi', card: 'card', wallet: 'coins' };
+const METHOD_ICON: Record<string, IconName> = { cash: 'cash', cash_nu: 'cash', upi: 'upi', upi_bhutan: 'upi', card: 'card', wallet: 'coins', package: 'box' };
 const pctOf = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 100) : 0);
 
 export function DayCloseScreen(p: DayCloseProps) {
@@ -93,7 +93,9 @@ export function DayCloseScreen(p: DayCloseProps) {
           <Stat label="Sales" value={money(t.sales)}
             sub={<>{t.bills} bill{t.bills === 1 ? '' : 's'}{t.due > 0.5 ? <> · <span className="warn-text strong">{money(t.due)} due</span></> : ''}</>} />
           <Stat label="Collected" value={money(t.collected)}
-            sub={t.refunds > 0 ? <span className="danger-text">after {money(t.refunds)} handed back</span> : t.coins_sold ? `incl. ${money(t.coins_sold)} coins sold` : 'Cash, UPI and card'} />
+            sub={t.refunds > 0 ? <span className="danger-text">after {money(t.refunds)} handed back</span>
+              : t.coins_sold || t.packages_sold ? `incl. ${[t.coins_sold ? `${money(t.coins_sold)} coins` : '', t.packages_sold ? `${money(t.packages_sold)} packages` : ''].filter(Boolean).join(' and ')} sold`
+              : 'Cash, UPI and card'} />
           <Stat label="Cash expected in drawer" value={money(t.expected_cash)}
             sub={nu ? <span className="num">+ {fmtNu(t.expected_cash_nu)}</span> : `Opening ${money(t.opening_cash)}`} />
           <Stat label="Expenses" value={money(t.expenses)} sub={t.expenses_cash ? `${money(t.expenses_cash)} from the drawer` : t.expenses ? 'None from the drawer' : 'Nothing spent'} />
@@ -122,6 +124,16 @@ export function DayCloseScreen(p: DayCloseProps) {
                   <div><div className="small muted">Sold</div><div className="coin-report-value num">{money(t.coins_sold)}</div><div className="tiny muted">Money received (an advance)</div></div>
                   <div><div className="small muted">Used on bills</div><div className="coin-report-value num">{fmtCoins(t.coins_used)}</div><div className="tiny muted">Not money received today</div></div>
                   {t.coins_bonus > 0 && <div><div className="small muted">Bonus given</div><div className="coin-report-value num">{fmtCoins(t.coins_bonus)}</div><div className="tiny muted">With coin packs</div></div>}
+                </div>
+              </Panel>
+            )}
+            {(t.packages_sold > 0 || t.package_used > 0 || t.package_refunds > 0) && (
+              <Panel title={<h2 className="row" style={{ gap: 8 }}><Icon name="box" size={18} className="pkg-title-icon" />Packages</h2>}>
+                <div className="coin-report">
+                  <div><div className="small muted">Sold</div><div className="coin-report-value num">{money(t.packages_sold)}</div>
+                    <div className="tiny muted">{t.packages_sold_count} package{t.packages_sold_count === 1 ? '' : 's'} · money received (an advance)</div></div>
+                  <div><div className="small muted">Sessions used on bills</div><div className="coin-report-value num">{money(t.package_used)}</div><div className="tiny muted">Not money received today</div></div>
+                  {t.package_refunds > 0 && <div><div className="small muted">Handed back</div><div className="coin-report-value num danger-text">{money(t.package_refunds)}</div><div className="tiny muted">On cancelled packages</div></div>}
                 </div>
               </Panel>
             )}
@@ -180,9 +192,9 @@ function ReconRow({ sign, label, sub, value, strong }: { sign?: '+' | '−' | '=
 
 function CashRecon({ s }: { s: DaySummary }) {
   const t = s.totals;
-  const cash = s.by_method.cash ?? { bills: 0, coins: 0, refunds: 0, net: 0 };
+  const cash = s.by_method.cash ?? { bills: 0, coins: 0, packages: 0, refunds: 0, net: 0 };
   const nuIn = Object.entries(s.by_method).filter(([m]) => m.startsWith('cash_'));
-  const nuBills = nuIn.reduce((a, [, r]) => a + r.bills + r.coins, 0);
+  const nuBills = nuIn.reduce((a, [, r]) => a + r.bills + r.coins + (r.packages || 0), 0);
   return (
     <div className="stack">
       <div className="dc-recon" role="table" aria-label="Rupee cash">
@@ -190,7 +202,8 @@ function CashRecon({ s }: { s: DaySummary }) {
           sub={s.opening.from_date ? `Left in the drawer at the close of ${fmtDateShort(s.opening.from_date)}` : 'No earlier close, so starting from ₹0'} />
         <ReconRow sign="+" label="Cash from bills" value={money(cash.bills)} sub="Includes later payments on older bills" />
         {cash.coins > 0 && <ReconRow sign="+" label="Cash for coins sold" value={money(cash.coins)} />}
-        {t.cash_refunds > 0 && <ReconRow sign="−" label={<span className="danger-text">Handed back on cancelled bills</span>} value={money(t.cash_refunds)} />}
+        {cash.packages > 0 && <ReconRow sign="+" label="Cash for packages sold" value={money(cash.packages)} />}
+        {t.cash_refunds > 0 && <ReconRow sign="−" label={<span className="danger-text">{t.package_refunds > 0 ? 'Handed back (cancelled bills and packages)' : 'Handed back on cancelled bills'}</span>} value={money(t.cash_refunds)} />}
         <ReconRow sign="−" label="Expenses paid in cash" value={money(t.expenses_cash)} />
         <ReconRow sign="=" label="Expected in the drawer" value={money(t.expected_cash)} strong />
       </div>
@@ -440,20 +453,22 @@ function DiscountsPanel({ s, tz }: { s: DaySummary; tz: string }) {
 // ---------- Payments ----------
 function MethodsPanel({ s, date }: { s: DaySummary; date: string }) {
   const rows = methodRows(s.by_method);
-  const money_ = rows.filter((r) => !isCoins(r.method));
+  const money_ = rows.filter((r) => !isPrepaid(r.method));
   const coins = rows.find((r) => isCoins(r.method));
+  const pkg = rows.find((r) => r.method === 'package');
   return (
     <Panel title="Payments" flush className="dc-clip" actions={<Link className="btn btn-ghost btn-sm no-print" href={`/app/invoices?range=custom&from=${date}&to=${date}`}>See bills</Link>}>
-      {money_.length || coins ? (
+      {money_.length || coins || pkg ? (
         <ul className="list dc-methods">
           {money_.map(({ method, row }) => {
-            const parts = [row.bills ? `Bills ${fmt(method, row.bills)}` : '', row.coins ? `coins sold ${fmt(method, row.coins)}` : '', row.refunds ? `handed back ${fmt(method, row.refunds)}` : ''].filter(Boolean);
+            const parts = [row.bills ? `Bills ${fmt(method, row.bills)}` : '', row.coins ? `coins sold ${fmt(method, row.coins)}` : '',
+              row.packages ? `packages sold ${fmt(method, row.packages)}` : '', row.refunds ? `handed back ${fmt(method, row.refunds)}` : ''].filter(Boolean);
             return (
               <li key={method} className="row">
                 <span className="dc-method-icon"><Icon name={METHOD_ICON[method] ?? 'wallet'} size={17} /></span>
                 <div className="grow">
                   <div className="strong">{methodLabel(method)}</div>
-                  {(row.coins > 0 || row.refunds > 0) && <div className="tiny muted">{parts.join(' · ')}</div>}
+                  {(row.coins > 0 || row.packages > 0 || row.refunds > 0) && <div className="tiny muted">{parts.join(' · ')}</div>}
                 </div>
                 <span className="num strong">{fmt(method, row.net)}</span>
               </li>
@@ -465,6 +480,13 @@ function MethodsPanel({ s, date }: { s: DaySummary; date: string }) {
               <span className="dc-method-icon is-coins"><Icon name="coins" size={17} /></span>
               <div className="grow"><div>Paid with coins</div><div className="tiny muted">From clients’ prepaid balance — not money received today</div></div>
               <span className="num muted">{fmtCoins(coins.row.bills - coins.row.refunds)}</span>
+            </li>
+          )}
+          {pkg && (
+            <li className="row">
+              <span className="dc-method-icon is-coins"><Icon name="box" size={17} /></span>
+              <div className="grow"><div>Package sessions</div><div className="tiny muted">Paid for when the package was sold — not money received today</div></div>
+              <span className="num muted">{money(pkg.row.bills - pkg.row.refunds)}</span>
             </li>
           )}
         </ul>

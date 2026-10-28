@@ -44,7 +44,7 @@ export default async function Page({ params }: { params: Promise<{ slug: string;
   if (!row.salon) notFound();
 
   const [{ data: items }, { data: pays }] = await Promise.all([
-    supabase.from('invoice_items').select('id, name, kind, code, qty, unit_price, discount, gst_rate, taxable, tax, line_total, staff_id').eq('invoice_id', id).order('sort'),
+    supabase.from('invoice_items').select('id, name, kind, code, qty, unit_price, discount, discount_note, gst_rate, taxable, tax, line_total, staff_id').eq('invoice_id', id).order('sort'),
     // Clients have no RLS access to payments; the invoice read above already proved this bill is theirs.
     createAdminClient().from('payments').select('method, amount').eq('invoice_id', id).order('created_at'),
   ]);

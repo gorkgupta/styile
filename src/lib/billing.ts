@@ -6,14 +6,23 @@ export interface BillLineInput {
   name: string;
   qty: number;
   unitPrice: number;
-  discount?: number;  // rupees off this line
+  discount?: number;  // rupees off this line, given at the desk
   /** Services: the menu's override (null = statutory rate). Products: the rate chosen. Custom: optional. */
   gstRate?: number | null;
-  kind?: 'service' | 'product' | 'custom';
+  kind?: 'service' | 'product' | 'custom' | 'membership';
+  /** Member discount (%) for an active member on this line — the database works out the same on save. */
+  memberPct?: number;
+  /** A session from the client's package: unitPrice is the session's value, no discounts, paid from the package. */
+  fromPackage?: boolean;
 }
 
 export interface BillLine extends BillLineInput {
-  gross: number; taxable: number; tax: number; lineTotal: number; gstRate: number; discount: number;
+  gross: number; taxable: number; tax: number; lineTotal: number; gstRate: number;
+  /** All rupees off this line: the desk's discount plus the member discount. */
+  discount: number;
+  memberDiscount: number;
+  /** Paid from the package (the session's value before any GST added on top). */
+  packagePaid: number;
 }
 
 export interface Bill {
@@ -22,6 +31,10 @@ export interface Bill {
   cgst: number; sgst: number; taxTotal: number; roundOff: number; total: number;
   /** Composition salons: the 6% they pay themselves (an estimate; never shown to the client). */
   compositionTax: number;
+  /** Member discounts on this bill (part of discountTotal). */
+  memberDiscountTotal: number;
+  /** Paid from packages (never more than the total); the rest is what the client pays now. */
+  packageTotal: number;
 }
 
 export interface BillOptions {
@@ -43,12 +56,14 @@ export function round0(n: number): number {
 }
 
 export function computeBill(items: BillLineInput[], opts: BillOptions): Bill {
-  let subtotal = 0, discountTotal = 0, taxableTotal = 0, taxTotal = 0, lines = 0;
+  let subtotal = 0, discountTotal = 0, taxableTotal = 0, taxTotal = 0, lines = 0, memberTotal = 0, pkgTotal = 0;
   const out: BillLine[] = items.map((it) => {
     const rate = opts.gstMode === 'regular' ? it.gstRate ?? opts.serviceRate : 0;
-    const discount = round2(it.discount ?? 0);
     const base = round2(it.qty * it.unitPrice);
+    const memberDiscount = it.fromPackage || !(it.kind === 'service' || it.kind === 'product') ? 0 : round2((base * (it.memberPct ?? 0)) / 100);
+    const discount = it.fromPackage ? 0 : round2((it.discount ?? 0) + memberDiscount);
     const gross = round2(Math.max(base - discount, 0));
+    const packagePaid = it.fromPackage ? gross : 0;
     let taxable: number, tax: number, lineTotal: number;
     if (opts.pricesIncludeTax) {
       taxable = round2((gross * 100) / (100 + rate));
@@ -60,7 +75,8 @@ export function computeBill(items: BillLineInput[], opts: BillOptions): Bill {
       lineTotal = round2(gross + tax);
     }
     subtotal += base; discountTotal += discount; taxableTotal += taxable; taxTotal += tax; lines += lineTotal;
-    return { ...it, gstRate: rate, discount, gross, taxable, tax, lineTotal };
+    memberTotal += memberDiscount; pkgTotal += packagePaid;
+    return { ...it, gstRate: rate, discount, memberDiscount, packagePaid, gross, taxable, tax, lineTotal };
   });
   subtotal = round2(subtotal); discountTotal = round2(discountTotal); taxableTotal = round2(taxableTotal);
   taxTotal = round2(taxTotal); lines = round2(lines);
@@ -70,6 +86,8 @@ export function computeBill(items: BillLineInput[], opts: BillOptions): Bill {
     lines: out, subtotal, discountTotal, taxableTotal,
     cgst, sgst: round2(taxTotal - cgst), taxTotal, roundOff: round2(total - lines), total,
     compositionTax: opts.gstMode === 'composition' ? round2((total * COMPOSITION_RATE) / 100) : 0,
+    memberDiscountTotal: round2(memberTotal),
+    packageTotal: round2(Math.min(pkgTotal, total)),
   };
 }
 

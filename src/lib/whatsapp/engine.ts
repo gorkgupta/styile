@@ -11,6 +11,7 @@ import { addDays, dayKeyOf, fmtDateShort, fmtHhmm, isValidDateStr, localDate, lo
 import type { CoinKind, Hours } from '../types';
 import { COIN_KIND_LABEL } from '../types';
 import { fmtCoins } from '../coins';
+import { dayText, daysLeft, perksText, sessionsText } from '../packages';
 import type { OutgoingMessage } from './cloud-api-payload';
 
 // ---------- LLM protocol (Anthropic Messages API shapes) ----------
@@ -32,6 +33,10 @@ export interface EngineStaff { id: string; name: string; title: string | null; s
 export interface EngineVisit { id: string; start_at: string; staff: string | null; services: string[]; serviceIds: string[]; status: string }
 /** A row of the client's coin ledger at this salon (coins: + added, − used). */
 export interface EngineCoinTx { created_at: string; kind: CoinKind; coins: number; balance_after: number; bill: string | null }
+/** A package the client can still use at this salon (last day expires_on, salon-local YYYY-MM-DD). */
+export interface EnginePackage { name: string; expires_on: string; items: { name: string; left: number; total: number }[] }
+/** The client's membership card valid today (or starting later, after a renewal). */
+export interface EngineMembership { name: string; starts_on: string; ends_on: string; service_discount_pct: number; product_discount_pct: number }
 
 export interface Pending {
   type: 'book' | 'cancel' | 'reschedule';
@@ -69,6 +74,8 @@ export interface EngineDeps {
   handoff(reason: string): Promise<void>;
   /** The client's coin balance at this salon and their latest coin transactions (newest first). */
   coins(): Promise<{ balance: number; recent: EngineCoinTx[] }>;
+  /** The client's packages with sessions left (not expired or cancelled) and their membership card at this salon. */
+  packages(): Promise<{ packages: EnginePackage[]; membership: EngineMembership | null }>;
 }
 
 export interface Inbound { text: string; buttonId?: string | null }
@@ -132,7 +139,9 @@ How to book:
 
 Coins: clients can prepay at ${salon.name} and get coins (1 coin = ₹1, often with a bonus) to pay their bills here. When the client asks how many coins they have, their balance, wallet or recent coin use, call my_coins and answer with the balance. Coins are bought at the front desk (cash, UPI or card) and can only be used at ${salon.name}; you can't add coins or take payments in this chat.
 
-Hand over to the team (handoff_to_staff) when: the client asks for a person, has a complaint, asks about refunds or payments (other than checking their coins), needs bridal/group bookings or anything not on the menu, has a medical or allergy question, or you are unsure. Tell them someone from the salon will reply here.
+Packages and membership: clients can buy a package of sessions (e.g. 6 facials) or a membership card (a discount on every bill) at the front desk. When the client asks how many sessions are left, about their package, when it ends, or about their membership card or member discount, call my_packages and answer with the sessions left and the last day. To use a session they book as usual and tell the desk at their visit; you can't sell packages or cards in this chat.
+
+Hand over to the team (handoff_to_staff) when: the client asks for a person, has a complaint, asks about refunds or payments (other than checking their coins or packages), needs bridal/group bookings or anything not on the menu, has a medical or allergy question, or you are unsure. Tell them someone from the salon will reply here.
 
 Salon details:
 - Phone: ${salon.phone ? '+' + salon.phone : 'not listed'}
@@ -214,6 +223,11 @@ export const TOOLS: LlmRequest['tools'] = [
   {
     name: 'my_coins',
     description: "The client's coin balance at this salon (prepaid, 1 coin = ₹1) and their last 5 coin transactions.",
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'my_packages',
+    description: "The client's packages at this salon with sessions left per service and the last day to use them, and their membership card (discount and end date).",
     input_schema: { type: 'object', properties: {} },
   },
   {
@@ -448,6 +462,28 @@ async function runTool(use: ToolUseBlock, ctx: EngineContext, deps: EngineDeps, 
             coins: `${t.coins > 0 ? '+' : '−'}${fmtCoins(Math.abs(t.coins))}`, balance_after: fmtCoins(t.balance_after), ...(t.bill ? { bill: t.bill } : {}),
           })),
           note: balance > 0 ? 'Coins are used at the salon when paying the bill — the client just asks at the front desk.' : 'No coins yet. Coins are bought at the front desk.',
+        },
+      };
+    }
+
+    case 'my_packages': {
+      const { packages, membership } = await deps.packages();
+      return {
+        result: {
+          packages: packages.map((p) => ({
+            name: p.name,
+            sessions_left: p.items.map((i) => `${i.name}: ${i.left} of ${i.total} left`),
+            use_by: dayText(p.expires_on, today),
+            ...(daysLeft(p.expires_on, today) <= 14 ? { ends_soon: `${daysLeft(p.expires_on, today)} days left — suggest booking soon` } : {}),
+            total_left: sessionsText(p.items.reduce((s, i) => s + i.left, 0)),
+          })),
+          membership: membership ? {
+            name: membership.name, discount: perksText(membership),
+            ...(membership.starts_on > today ? { starts: dayText(membership.starts_on, today) } : {}), valid_till: dayText(membership.ends_on, today),
+          } : null,
+          note: packages.length || membership
+            ? 'Sessions and the member discount are used at the salon on the bill — the client just tells the desk.'
+            : 'No packages or membership card at this salon yet. They can be bought at the front desk.',
         },
       };
     }

@@ -22,6 +22,8 @@ export interface BillItemInput {
   gstRate?: number | null;
   /** HSN for products (4, 6 or 8 digits), optional. */
   code?: string | null;
+  /** Take this service from the client's package (the database prices it at the session's value and pays it). */
+  clientPackageId?: string | null;
 }
 
 export interface BillPaymentInput { method: PayMethod; amount: number; reference?: string }
@@ -56,6 +58,11 @@ export async function createInvoice(input: CreateInvoiceInput): Promise<ActionRe
       if (i.discount > i.qty * i.unitPrice) return { ok: false, error: `Discount on “${i.name}” is more than its price.` };
       if (i.gstRate != null && !(GST_SLABS as readonly number[]).includes(i.gstRate)) return { ok: false, error: `GST on “${i.name}” must be 0, 5, 12, 18 or 28%.` };
       if (i.code && !HSN_RE.test(i.code.trim())) return { ok: false, error: `HSN code for “${i.name}” should be 4, 6 or 8 digits, like 3305.` };
+      if (i.clientPackageId) {
+        if (i.kind !== 'service' || !i.serviceId) return { ok: false, error: `Only a service from your menu can be taken from a package.` };
+        if (!input.customerId) return { ok: false, error: 'Choose the client to use their package.' };
+        if (!Number.isInteger(i.qty)) return { ok: false, error: `Package sessions for “${i.name}” are whole numbers.` };
+      }
     }
     const clientGstin = cleanGstin(input.clientGstin) || null;
     if (clientGstin && salon.gst_mode !== 'regular') return { ok: false, error: 'A client GSTIN goes on tax invoices only. Set your GST status in Settings.' };
@@ -63,6 +70,7 @@ export async function createInvoice(input: CreateInvoiceInput): Promise<ActionRe
     const clientAddress = (input.clientAddress ?? '').trim().replace(/\s+/g, ' ').slice(0, 240) || null;
     const payments = (input.payments ?? []).filter((p) => finite(p.amount) && p.amount > 0);
     for (const p of payments) if (!METHODS.includes(p.method)) return { ok: false, error: 'Pick a payment method.' };
+    // Package sessions are paid by the database from the package lines; the desk never sends them as a payment.
 
     const inv = must(await supabase.rpc('create_invoice', {
       p_salon: salon.id,
@@ -82,6 +90,7 @@ export async function createInvoice(input: CreateInvoiceInput): Promise<ActionRe
           discount: i.discount,
           gst_rate: i.kind === 'service' ? null : i.gstRate ?? null,
           code: i.kind === 'service' ? null : i.code?.trim() || null,
+          client_package_id: i.kind === 'service' && i.clientPackageId ? i.clientPackageId : null,
         })),
         payments: payments.map((p) => ({ method: p.method, amount: p.amount, reference: p.reference?.trim() || null })),
       },

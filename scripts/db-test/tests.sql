@@ -729,6 +729,240 @@ select t.ok(not ((:'s_nu'::jsonb -> 'totals' ->> 'expected_cash')::numeric >= 45
   'Ngultrum is not added to the rupee drawer');
 reset role;
 
+-- ===== Packages and membership cards (0011 + 0012) =====
+-- A regular-GST Jaigaon parlour: owner Sonam, front desk Pema, stylist Tenzin; clients Deki (logs in with +975) and Sita.
+reset role;
+insert into auth.users (id, email, raw_user_meta_data) values
+  ('00000000-0000-0000-0000-0000000000e1', 'sonam@glow.bt', '{"full_name":"Sonam"}'),
+  ('00000000-0000-0000-0000-0000000000e2', 'pema@glow.bt', '{"full_name":"Pema"}'),
+  ('00000000-0000-0000-0000-0000000000e3', 'tenzin@glow.bt', '{"full_name":"Tenzin"}');
+insert into auth.users (id, phone, phone_confirmed_at) values ('00000000-0000-0000-0000-0000000000e4', '97517998877', now());
+set role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000e1","role":"authenticated"}', false);
+select (public.create_salon('Sonam Glow Parlour', 'sonam-glow', '919800055501', 'Jaigaon', 'Sonam', true, 'regular', '19AAPFS1234K1Z3', 'West Bengal')).id as salon_p \gset
+select id as p_facial from public.services where salon_id = :'salon_p' and name = 'Facial' \gset
+select id as p_cleanup from public.services where salon_id = :'salon_p' and name = 'Clean-up' \gset
+select id as p_cut from public.services where salon_id = :'salon_p' and name = 'Haircut' \gset
+insert into public.staff (salon_id, user_id, name) values (:'salon_p', '00000000-0000-0000-0000-0000000000e2', 'Pema') returning id as pema_d \gset
+insert into public.staff (salon_id, user_id, name) values (:'salon_p', '00000000-0000-0000-0000-0000000000e3', 'Tenzin') returning id as tenzin \gset
+insert into public.salon_members (salon_id, user_id, role, staff_id) values
+  (:'salon_p', '00000000-0000-0000-0000-0000000000e2', 'receptionist', :'pema_d'),
+  (:'salon_p', '00000000-0000-0000-0000-0000000000e3', 'stylist', :'tenzin');
+insert into public.customers (salon_id, name, phone) values (:'salon_p', 'Deki Wangmo', '97517998877') returning id as deki \gset
+insert into public.customers (salon_id, name, phone) values (:'salon_p', 'Sita Rai', '919733066601') returning id as sita \gset
+
+-- The owner puts packages and a membership card on the menu
+select (public.save_service_package(:'salon_p', null, jsonb_build_object('name', '6 Facials', 'price', 9000, 'validity_days', 180,
+  'items', jsonb_build_array(jsonb_build_object('service_id', :'p_facial', 'sessions', 6))))).id as pk6 \gset
+select (public.save_service_package(:'salon_p', null, jsonb_build_object('name', 'Bridal glow pack', 'price', 5400, 'validity_days', 90,
+  'items', jsonb_build_array(jsonb_build_object('service_id', :'p_cleanup', 'sessions', 3), jsonb_build_object('service_id', :'p_facial', 'sessions', 2))))).id as pkb \gset
+select t.ok((select count(*) from public.service_package_items where package_id = :'pkb') = 2 and (select price from public.service_packages where id = :'pk6') = 9000,
+  'owner saves packages with their services and sessions');
+select t.fails(format($q$select public.save_service_package(%L, null, jsonb_build_object('name', 'Twice', 'price', 100, 'items', jsonb_build_array(jsonb_build_object('service_id', %L, 'sessions', 1), jsonb_build_object('service_id', %L, 'sessions', 2))))$q$, :'salon_p', :'p_cut', :'p_cut'), 'a service can''t be in a package twice');
+select t.fails(format($q$select public.save_service_package(%L, null, jsonb_build_object('name', 'Zero', 'price', 100, 'items', jsonb_build_array(jsonb_build_object('service_id', %L, 'sessions', 0))))$q$, :'salon_p', :'p_cut'), 'sessions must be at least 1');
+select t.fails(format($q$select public.save_service_package(%L, null, jsonb_build_object('name', 'Empty', 'price', 100, 'items', '[]'::jsonb))$q$, :'salon_p'), 'a package needs at least one service');
+select t.fails(format($q$select public.save_service_package(%L, null, jsonb_build_object('name', 'Theirs', 'price', 100, 'items', jsonb_build_array(jsonb_build_object('service_id', %L, 'sessions', 1))))$q$, :'salon_p', :'haircut'), 'a package can''t use another salon''s service');
+insert into public.membership_plans (salon_id, name, fee, validity_days, service_discount_pct, product_discount_pct)
+  values (:'salon_p', 'Glow Card', 299, 365, 10, 5) returning id as card \gset
+select t.fails(format($q$insert into public.membership_plans (salon_id, name, fee, service_discount_pct) values (%L, 'Greedy', 99, 60)$q$, :'salon_p'), 'member discount at most 50%');
+select t.fails(format($q$insert into public.membership_plans (salon_id, name, fee, service_discount_pct, product_discount_pct) values (%L, 'Nothing', 99, 0, 0)$q$, :'salon_p'), 'a card must give some discount');
+
+-- Front desk
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000e2","role":"authenticated"}', false);
+select t.fails(format($q$select public.save_service_package(%L, null, jsonb_build_object('name', 'Desk pack', 'price', 100, 'items', jsonb_build_array(jsonb_build_object('service_id', %L, 'sessions', 1))))$q$, :'salon_p', :'p_cut'), 'front desk can''t change packages on the menu');
+select t.fails(format($q$insert into public.membership_plans (salon_id, name, fee, service_discount_pct) values (%L, 'Desk card', 99, 10)$q$, :'salon_p'), 'front desk can''t add membership cards to the menu');
+
+-- Selling a package: a package receipt, not a bill
+select * from public.sell_package(:'salon_p', :'deki', :'pk6', 'upi', 'UPI 5521', null) \gset cp1_
+select t.ok(:'cp1_receipt_no' = 'PK-00001' and :cp1_amount_paid = 9000 and :'cp1_method' = 'upi' and :'cp1_status' = 'active'
+  and :'cp1_expires_on'::date = public.salon_today(:'salon_p') + 180, 'front desk sells 6 Facials: receipt PK-00001, ₹9,000 by UPI, valid 180 days');
+select t.ok((select count(*) = 1 and min(sessions_total) = 6 and min(sessions_used) = 0 and min(unit_value) = 1500 from public.client_package_items where client_package_id = :'cp1_id'),
+  'each facial in the pack is worth ₹1,500 (₹9,000 ÷ 6)');
+select t.ok(not exists (select 1 from public.invoices where salon_id = :'salon_p'), 'selling a package makes no bill (GST comes when sessions are used)');
+select t.fails(format($q$select public.sell_package(%L, %L, %L, 'wallet')$q$, :'salon_p', :'sita', :'pk6'), 'coins can''t buy a package');
+select t.fails(format($q$select public.sell_package(%L, %L, %L, 'package')$q$, :'salon_p', :'sita', :'pk6'), 'a package can''t buy a package');
+select t.fails(format($q$select public.sell_package(%L, %L, %L, 'cash')$q$, :'salon_p', :'kabir', :'pk6'), 'can''t sell a package to another salon''s client');
+select * from public.sell_package(:'salon_p', :'sita', :'pkb', 'cash') \gset cp2_
+select t.ok(:'cp2_receipt_no' = 'PK-00002' and (select string_agg(name || ':' || sessions_total || 'x' || unit_value::int, ',' order by sort) from public.client_package_items where client_package_id = :'cp2_id') = 'Clean-up:3x771,Facial:2x1543',
+  'mixed pack: session values shared by menu price, to the rupee');
+
+-- Using a session: the bill shows the service at its value, paid 100% from the package, GST on that value
+select * from public.create_invoice(:'salon_p', jsonb_build_object('customer_id', :'deki', 'items', jsonb_build_array(
+  jsonb_build_object('kind','service','service_id',:'p_facial','staff_id',:'tenzin','name','Facial','qty',1,'unit_price',1800,'discount',100,'client_package_id',:'cp1_id'),
+  jsonb_build_object('kind','service','service_id',:'p_cut','staff_id',:'tenzin','name','Haircut','qty',1,'unit_price',600)),
+  'payments', '[{"method":"cash","amount":600}]'::jsonb)) \gset b1_
+select t.ok(:b1_total = 2100 and :'b1_status' = 'paid' and :'b1_bill_type' = 'tax_invoice' and :b1_cgst = 50 and :b1_sgst = 50,
+  'package session + haircut: ₹2,100 tax invoice, ₹100 GST (5% on ₹1,500 and ₹600, prices incl. GST)');
+select t.ok((select unit_price = 1500 and discount = 0 and taxable = 1428.57 and tax = 71.43 and gst_rate = 5 and code = '999722' and discount_note = 'Package'
+               and client_package_id = :'cp1_id' from public.invoice_items where invoice_id = :'b1_id' and sort = 1),
+  'package line priced at the session value (sent price and discount ignored), taxed at 5% with its SAC');
+select t.ok((select amount from public.payments where invoice_id = :'b1_id' and method = 'package') = 1500
+  and (select reference from public.payments where invoice_id = :'b1_id' and method = 'package') = 'PK-00001 · 6 Facials', 'package pays the session: method package, ₹1,500');
+select t.ok((select sessions_used from public.client_package_items where client_package_id = :'cp1_id') = 1, 'one facial used: 5 left');
+select (public.create_invoice(:'salon_p', jsonb_build_object('customer_id', :'deki', 'items', jsonb_build_array(
+  jsonb_build_object('kind','service','service_id',:'p_facial','name','Facial','qty',1,'unit_price',1500,'client_package_id',:'cp1_id'))))).id as b2 \gset
+select t.ok((select status = 'paid' and paid_total = 1500 from public.invoices where id = :'b2') and (select sessions_used from public.client_package_items where client_package_id = :'cp1_id') = 2,
+  'a bill of only package sessions is fully paid');
+select t.ok(t.err(format($q$select public.create_invoice(%L, jsonb_build_object('customer_id', %L, 'items', jsonb_build_array(jsonb_build_object('kind','service','service_id',%L,'name','Facial','qty',1,'unit_price',1500,'client_package_id',%L))))$q$, :'salon_p', :'sita', :'p_facial', :'cp1_id'))
+  = 'That package belongs to another client', 'can''t use another client''s package');
+select t.fails(format($q$select public.create_invoice(%L, jsonb_build_object('items', jsonb_build_array(jsonb_build_object('kind','service','service_id',%L,'name','Facial','qty',1,'unit_price',1500,'client_package_id',%L))))$q$, :'salon_p', :'p_facial', :'cp1_id'), 'a package session needs the client on the bill');
+select t.ok(t.err(format($q$select public.create_invoice(%L, jsonb_build_object('customer_id', %L, 'items', jsonb_build_array(jsonb_build_object('kind','service','service_id',%L,'name','Haircut','qty',1,'unit_price',600,'client_package_id',%L))))$q$, :'salon_p', :'deki', :'p_cut', :'cp1_id'))
+  = '“Haircut” isn''t part of the package “6 Facials”', 'only services in the package can be taken from it');
+select t.ok(t.err(format($q$select public.create_invoice(%L, jsonb_build_object('customer_id', %L, 'items', jsonb_build_array(jsonb_build_object('kind','service','service_id',%L,'name','Facial','qty',5,'unit_price',1500,'client_package_id',%L))))$q$, :'salon_p', :'deki', :'p_facial', :'cp1_id'))
+  = 'Only 4 Facial sessions left in “6 Facials”', 'can''t take more sessions than are left');
+select t.fails(format($q$select public.create_invoice(%L, jsonb_build_object('customer_id', %L, 'items', jsonb_build_array(jsonb_build_object('kind','custom','name','Facial','qty',1,'unit_price',1500,'client_package_id',%L))))$q$, :'salon_p', :'deki', :'cp1_id'), 'a custom line can''t take a package session');
+select t.fails(format($q$select public.create_invoice(%L, jsonb_build_object('customer_id', %L, 'items', '[{"kind":"custom","name":"x","qty":1,"unit_price":100}]'::jsonb, 'payments', '[{"method":"package","amount":100}]'::jsonb))$q$, :'salon_p', :'deki'), 'the app can''t send a package payment itself');
+select t.fails(format($q$select public.add_payment(%L, 'package', 100)$q$, :'b2'), 'package payments can''t be added to a bill later');
+select t.ok((select sessions_used from public.client_package_items where client_package_id = :'cp1_id') = 2, 'failed bills don''t use up sessions');
+
+-- Using up a pack, then nothing left
+select (public.create_invoice(:'salon_p', jsonb_build_object('customer_id', :'sita', 'items', jsonb_build_array(
+  jsonb_build_object('kind','service','service_id',:'p_cleanup','name','Clean-up','qty',3,'unit_price',900,'client_package_id',:'cp2_id'))))).total as b3_total \gset
+select (public.create_invoice(:'salon_p', jsonb_build_object('customer_id', :'sita', 'items', jsonb_build_array(
+  jsonb_build_object('kind','service','service_id',:'p_facial','name','Facial','qty',2,'unit_price',1800,'client_package_id',:'cp2_id'))))).status as b4_status \gset
+select t.ok(:b3_total = 2313 and :'b4_status' = 'paid' and (select status from public.client_packages where id = :'cp2_id') = 'used',
+  'bridal pack used up: 3 clean-ups (₹2,313) and 2 facials, package marked used');
+select t.ok(t.err(format($q$select public.create_invoice(%L, jsonb_build_object('customer_id', %L, 'items', jsonb_build_array(jsonb_build_object('kind','service','service_id',%L,'name','Facial','qty',1,'unit_price',1800,'client_package_id',%L))))$q$, :'salon_p', :'sita', :'p_facial', :'cp2_id'))
+  = 'All Facial sessions in “Bridal glow pack” are used', 'a used-up package can''t be used again');
+
+-- Expired package
+select * from public.sell_package(:'salon_p', :'sita', :'pk6', 'card', 'Card 4410') \gset cp3_
+reset role;
+update public.client_packages set expires_on = public.salon_today(:'salon_p') - 1 where id = :'cp3_id';
+set role authenticated;
+select t.ok(t.err(format($q$select public.create_invoice(%L, jsonb_build_object('customer_id', %L, 'items', jsonb_build_array(jsonb_build_object('kind','service','service_id',%L,'name','Facial','qty',1,'unit_price',1800,'client_package_id',%L))))$q$, :'salon_p', :'sita', :'p_facial', :'cp3_id'))
+  like '“6 Facials” expired on %', 'an expired package can''t be used');
+
+-- Cancelling a bill gives the session back; owner cancels packages
+select t.fails(format($q$select public.cancel_client_package(%L, 'Wrong client')$q$, :'cp3_id'), 'front desk can''t cancel a package');
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000e1","role":"authenticated"}', false);
+select public.void_invoice(:'b2', 'Client left before the facial') \gset
+select t.ok((select sessions_used from public.client_package_items where client_package_id = :'cp1_id') = 1, 'cancelling the bill gives the session back');
+select id as b4 from public.invoices where salon_id = :'salon_p' and customer_id = :'sita' and total = 3086 \gset
+select public.void_invoice(:'b4', 'Billed the wrong day') \gset
+select t.ok((select status from public.client_packages where id = :'cp2_id') = 'active'
+  and (select sessions_used from public.client_package_items where client_package_id = :'cp2_id' and name = 'Facial') = 0, 'a used-up package is active again when its bill is cancelled');
+select t.fails(format($q$select public.cancel_client_package(%L, 'x', 9500, 'cash')$q$, :'cp3_id'), 'can''t hand back more than was paid');
+select t.fails(format($q$select public.cancel_client_package(%L, 'x', 100, 'wallet')$q$, :'cp3_id'), 'money handed back is cash, UPI or card');
+select t.fails(format($q$select public.cancel_client_package(%L, '  ')$q$, :'cp3_id'), 'cancelling a package needs a reason');
+select (public.cancel_client_package(:'cp3_id', 'Expired unused, part refund as goodwill', 2000, 'cash')).status as cp3_status \gset
+select t.ok(:'cp3_status' = 'cancelled' and (select refund_amount = 2000 and refund_method = 'cash' and cancelled_by = '00000000-0000-0000-0000-0000000000e1' from public.client_packages where id = :'cp3_id'),
+  'owner cancels a package, recording ₹2,000 handed back in cash');
+select t.fails(format($q$select public.cancel_client_package(%L, 'again')$q$, :'cp3_id'), 'a package is cancelled once');
+-- Nobody edits sessions or status directly
+update public.client_package_items set sessions_used = 0 where client_package_id = :'cp1_id';
+update public.client_packages set status = 'active', expires_on = '2099-01-01' where id = :'cp3_id';
+select t.ok((select sessions_used from public.client_package_items where client_package_id = :'cp1_id') = 1 and (select status from public.client_packages where id = :'cp3_id') = 'cancelled',
+  'even the owner can''t edit sessions, status or expiry directly');
+select t.fails(format($q$insert into public.client_packages (salon_id, customer_id, name, price, validity_days, expires_on, receipt_no, amount_paid, method) values (%L, %L, 'Free', 1, 1, '2099-01-01', 'PK-99999', 1, 'cash')$q$, :'salon_p', :'deki'), 'packages can''t be inserted directly');
+select t.fails(format($q$insert into public.client_memberships (salon_id, customer_id, name, fee, service_discount_pct, product_discount_pct, starts_on, ends_on) values (%L, %L, 'Fake', 0, 50, 50, '2026-01-01', '2099-01-01')$q$, :'salon_p', :'sita'), 'memberships can''t be inserted directly');
+
+-- Membership card: a normal bill line, then automatic member prices
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000e2","role":"authenticated"}', false);
+select t.fails(format($q$select public.sell_membership(%L, %L, %L, '[{"method":"upi","amount":100}]'::jsonb)$q$, :'salon_p', :'deki', :'card'), 'the full card fee must be taken');
+select t.fails(format($q$select public.create_invoice(%L, jsonb_build_object('customer_id', %L, 'items', '[{"kind":"membership","name":"Membership card","qty":1,"unit_price":299}]'::jsonb))$q$, :'salon_p', :'deki'), 'a card line can''t be billed without starting the membership');
+select public.sell_membership(:'salon_p', :'deki', :'card', '[{"method":"upi","amount":299,"reference":"UPI 7781"}]'::jsonb) as m1 \gset
+select (:'m1'::jsonb #>> '{membership,id}') as m1_id, (:'m1'::jsonb #>> '{invoice,id}') as m1_inv \gset
+select t.ok((select status = 'active' and starts_on = public.salon_today(:'salon_p') and ends_on = public.salon_today(:'salon_p') + 364
+               and service_discount_pct = 10 and product_discount_pct = 5 and invoice_id = :'m1_inv' from public.client_memberships where id = :'m1_id'),
+  'front desk sells a Glow Card: active from today for 365 days, linked to its bill');
+select t.ok((select kind = 'membership' and name = 'Membership card · Glow Card' and code = '999729' and gst_rate = 5 and taxable = 284.76 and tax = 14.24
+               from public.invoice_items where invoice_id = :'m1_inv') and (select bill_type = 'tax_invoice' and status = 'paid' and total = 299 from public.invoices where id = :'m1_inv'),
+  'card fee billed as a normal line: SAC 999729 at 5% on a tax invoice');
+select t.ok((select visit_count from public.customers where id = :'deki') = 1, 'buying a card alone isn''t counted as a visit');
+select * from public.create_invoice(:'salon_p', jsonb_build_object('customer_id', :'deki', 'items', jsonb_build_array(
+  jsonb_build_object('kind','service','service_id',:'p_cut','name','Haircut','qty',1,'unit_price',600,'discount',40),
+  jsonb_build_object('kind','product','name','Shampoo','qty',1,'unit_price',400,'gst_rate',5,'code','3305'),
+  jsonb_build_object('kind','service','service_id',:'p_facial','name','Facial','qty',1,'unit_price',1800,'client_package_id',:'cp1_id')),
+  'payments', '[{"method":"cash","amount":880}]'::jsonb)) \gset b5_
+select t.ok((select discount = 100 and member_discount = 60 and discount_note = 'Member 10%' from public.invoice_items where invoice_id = :'b5_id' and sort = 1)
+  and (select discount = 20 and member_discount = 20 and discount_note = 'Member 5%' from public.invoice_items where invoice_id = :'b5_id' and sort = 2),
+  'member prices applied by the database: 10% off the haircut (plus ₹40 given at the desk), 5% off the shampoo');
+select t.ok((select discount = 0 and member_discount = 0 and unit_price = 1500 from public.invoice_items where invoice_id = :'b5_id' and sort = 3), 'no member discount on a package session (already paid)');
+select t.ok(:b5_total = 2380 and :'b5_status' = 'paid' and :'b5_client_membership_id' = :'m1_id', 'member bill: ₹880 + ₹1,500 package session, linked to the card');
+select * from public.create_invoice(:'salon_p', jsonb_build_object('customer_id', :'sita', 'items', jsonb_build_array(
+  jsonb_build_object('kind','service','service_id',:'p_cut','name','Haircut','qty',1,'unit_price',600,'member_discount',300,'discount_note','Member 50%')),
+  'payments', '[{"method":"upi","amount":600}]'::jsonb)) \gset b6_
+select t.ok(:b6_total = 600 and (select client_membership_id is null from public.invoices where id = :'b6_id') and (select discount = 0 and member_discount = 0 and discount_note is null from public.invoice_items where invoice_id = :'b6_id'),
+  'a member discount can''t be faked for a client without a card');
+-- Renewal starts when the current card ends; cancelling the card's bill cancels the card
+select public.sell_membership(:'salon_p', :'deki', :'card', '[{"method":"cash","amount":299}]'::jsonb) as m2 \gset
+select (:'m2'::jsonb #>> '{membership,id}') as m2_id, (:'m2'::jsonb #>> '{invoice,id}') as m2_inv \gset
+select t.ok((select starts_on = public.salon_today(:'salon_p') + 365 from public.client_memberships where id = :'m2_id'), 'renewing starts the new card the day after the current one ends');
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000e1","role":"authenticated"}', false);
+select public.void_invoice(:'m2_inv', 'Renewed by mistake') \gset
+select t.ok((select status = 'cancelled' and cancel_reason like 'Bill % cancelled' from public.client_memberships where id = :'m2_id'), 'cancelling the card''s bill cancels the card');
+
+-- Day close: package sales are money received that day; package sessions on bills are not
+select public.day_summary(:'salon_p', public.salon_today(:'salon_p')) as ps \gset
+select t.ok((:'ps'::jsonb #>> '{by_method,cash,bills}')::numeric = 1779 and (:'ps'::jsonb #>> '{by_method,cash,packages}')::numeric = 5400
+  and (:'ps'::jsonb #>> '{by_method,cash,refunds}')::numeric = 2299 and (:'ps'::jsonb #>> '{by_method,cash,net}')::numeric = 4880
+  and (:'ps'::jsonb #>> '{by_method,upi,net}')::numeric = 9899 and (:'ps'::jsonb #>> '{by_method,card,packages}')::numeric = 9000,
+  'day close by method: packages sold counted by how they were paid; cash handed back on a cancelled package and card bill');
+select t.ok((:'ps'::jsonb #>> '{by_method,package,bills}')::numeric = 9899 and (:'ps'::jsonb #>> '{by_method,package,refunds}')::numeric = 4586,
+  'package sessions show under their own method');
+select t.ok((:'ps'::jsonb #>> '{totals,received}')::numeric = 26078 and (:'ps'::jsonb #>> '{totals,refunds}')::numeric = 2299
+  and (:'ps'::jsonb #>> '{totals,collected}')::numeric = 23779, 'collected ₹23,779: package sessions are not money received today');
+select t.ok((:'ps'::jsonb #>> '{totals,packages_sold}')::numeric = 23400 and (:'ps'::jsonb #>> '{totals,packages_sold_count}')::int = 3
+  and (:'ps'::jsonb #>> '{totals,package_refunds}')::numeric = 2000 and (:'ps'::jsonb #>> '{totals,package_used}')::numeric = 5313,
+  'day close: packages sold, handed back and sessions used');
+select t.ok((:'ps'::jsonb #>> '{totals,expected_cash}')::numeric = 4880, 'cash expected includes cash taken for packages, less cash handed back');
+select t.ok((select (e #>> '{collected_by_method,upi}')::numeric = 9899 and (e #>> '{collected_by_method,card}')::numeric = 9000
+             from jsonb_array_elements(:'ps'::jsonb -> 'by_staff') e where e ->> 'name' = 'Pema'), 'by staff: the desk is credited with package money it took');
+
+-- Reports
+select public.salon_report(:'salon_p', public.salon_today(:'salon_p'), public.salon_today(:'salon_p')) as pr \gset
+select t.ok((:'pr'::jsonb ->> 'packages_sold')::int = 3 and (:'pr'::jsonb ->> 'packages_sold_amount')::numeric = 23400 and (:'pr'::jsonb ->> 'packages_refunded')::numeric = 2000,
+  'report: 3 packages sold for ₹23,400, ₹2,000 handed back');
+select t.ok((:'pr'::jsonb ->> 'package_sessions_redeemed')::numeric = 5 and (:'pr'::jsonb ->> 'package_redeemed_value')::numeric = 5313,
+  'report: 5 sessions used on bills that stand, worth ₹5,313');
+select t.ok((:'pr'::jsonb ->> 'package_sessions_outstanding')::numeric = 6 and (:'pr'::jsonb ->> 'package_outstanding_value')::numeric = 9086,
+  'report: sessions still owed — 4 facials at ₹1,500 and 2 bridal-pack facials at ₹1,543 (₹9,086); cancelled packages left out');
+select t.ok((:'pr'::jsonb ->> 'memberships_sold')::int = 1 and (:'pr'::jsonb ->> 'memberships_amount')::numeric = 299
+  and (:'pr'::jsonb ->> 'member_discounts')::numeric = 80 and (:'pr'::jsonb ->> 'active_members')::int = 1, 'report: cards sold, member discounts given, members now');
+select t.ok((:'pr'::jsonb -> 'by_method' ->> 'package')::numeric = 5313, 'report payment mix shows package sessions separately');
+
+-- GST added on top: the session's value comes from the package, the GST is paid at the visit
+update public.salons set prices_include_tax = false where id = :'salon_p';
+select * from public.create_invoice(:'salon_p', jsonb_build_object('customer_id', :'sita', 'items', jsonb_build_array(
+  jsonb_build_object('kind','service','service_id',:'p_facial','name','Facial','qty',1,'unit_price',1800,'client_package_id',:'cp2_id')))) \gset b7_
+select t.ok(:b7_total = 1620 and :b7_paid_total = 1543 and :'b7_status' = 'partial', 'GST added on top: the ₹1,543 session is paid from the package, its ₹77 GST at the visit');
+update public.salons set prices_include_tax = true where id = :'salon_p';
+
+-- Membership expiry
+reset role;
+update public.client_memberships set starts_on = public.salon_today(:'salon_p') - 400, ends_on = public.salon_today(:'salon_p') - 1 where id = :'m1_id';
+set role authenticated;
+select (public.create_invoice(:'salon_p', jsonb_build_object('customer_id', :'deki', 'items', jsonb_build_array(
+  jsonb_build_object('kind','service','service_id',:'p_cut','name','Haircut','qty',1,'unit_price',600))))).discount_total as exp_disc \gset
+select t.ok(:exp_disc = 0, 'no member price after the card ends');
+
+-- Stylist: sees sessions left, can't sell
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000e3","role":"authenticated"}', false);
+select t.ok((select count(*) from public.client_packages where salon_id = :'salon_p') = 3 and (select count(*) from public.client_package_items where salon_id = :'salon_p') = 4,
+  'stylist can see clients'' packages and sessions left');
+select t.fails(format($q$select public.sell_package(%L, %L, %L, 'cash')$q$, :'salon_p', :'sita', :'pk6'), 'stylist can''t sell packages');
+select t.fails(format($q$select public.sell_membership(%L, %L, %L, '[{"method":"cash","amount":299}]'::jsonb)$q$, :'salon_p', :'sita', :'card'), 'stylist can''t sell membership cards');
+
+-- Another salon
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-00000000000b","role":"authenticated"}', false);
+select t.ok((select count(*) from public.client_packages) = 0 and (select count(*) from public.client_memberships) = 0 and (select count(*) from public.service_packages) = 0,
+  'other salon can''t see packages or memberships');
+select t.fails(format($q$select public.sell_package(%L, %L, %L, 'cash')$q$, :'salon_p', :'sita', :'pk6'), 'other salon can''t sell this salon''s packages');
+select t.fails(format($q$select public.sell_package(%L, %L, %L, 'cash')$q$, :'salon_b', :'kabir', :'pk6'), 'other salon can''t sell this salon''s package to its own client');
+select t.ok(t.err(format($q$select public.create_invoice(%L, jsonb_build_object('customer_id', %L, 'items', jsonb_build_array(jsonb_build_object('kind','service','service_id',%L,'name','Fade','qty',1,'unit_price',300,'client_package_id',%L))))$q$, :'salon_b', :'kabir', :'fade', :'cp1_id'))
+  = 'Package not found at this salon', 'a package can only be used at the salon that sold it');
+select t.fails(format($q$select public.cancel_client_package(%L, 'x')$q$, :'cp1_id'), 'other salon can''t cancel a package');
+
+-- The client: their own packages and card
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000e4","role":"authenticated"}', false);
+select t.ok(public.claim_customer_profiles() = 1, 'Deki''s +975 login links her record');
+select t.ok((select count(*) from public.client_packages) = 1 and (select count(*) from public.client_package_items) = 1
+  and (select count(*) from public.client_memberships) = 2 and not exists (select 1 from public.client_packages where customer_id <> :'deki'),
+  'client sees her own packages and cards only');
+select t.fails(format($q$select public.sell_package(%L, %L, %L, 'cash')$q$, :'salon_p', :'deki', :'pk6'), 'client can''t sell herself a package');
+reset role;
+
 -- ===== Anonymous =====
 reset role;
 set role anon;
