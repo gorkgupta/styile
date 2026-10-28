@@ -8,6 +8,7 @@ import { cleanHours } from '@/lib/hours';
 import { invalidPhoneMessage, normalizePhone } from '@/lib/phone';
 import { cleanGstin, GSTIN_RE, stateByCode, stateByName } from '@/lib/gst';
 import { isValidVpa } from '@/lib/upi';
+import { isLocale } from '@/lib/i18n/locales';
 import { ALL_PAY_METHODS, type ActionResult, type CoinPack, type GstMode, type Hours, type PayMethod, type ReceiptSize } from '@/lib/types';
 
 // Salon settings. Only the owner can change these (RLS: salons_owner_update). Subscription, booking link
@@ -134,7 +135,11 @@ export async function updateBusinessHours(hours: Hours): Promise<ActionResult> {
   } catch (e) { return fail(e); }
 }
 
-export interface OnlineBookingInput { bookingEnabled: boolean; slotIntervalMin: number; bookingLeadMin: number; bookingWindowDays: number }
+export interface OnlineBookingInput {
+  bookingEnabled: boolean; slotIntervalMin: number; bookingLeadMin: number; bookingWindowDays: number;
+  /** Language of the booking page and the client pages (en, hi, ne, bn); clients can switch it themselves. */
+  defaultLocale?: string;
+}
 
 export async function updateOnlineBooking(input: OnlineBookingInput): Promise<ActionResult> {
   try {
@@ -146,8 +151,10 @@ export async function updateOnlineBooking(input: OnlineBookingInput): Promise<Ac
     if (!SLOT_INTERVALS.includes(interval)) return { ok: false, error: 'Time slots must be every 5, 10, 15, 20, 30 or 60 minutes.' };
     if (!Number.isFinite(lead) || lead < 0 || lead > 7 * 24 * 60) return { ok: false, error: 'Minimum notice must be between 0 minutes and 7 days.' };
     if (!Number.isFinite(windowDays) || windowDays < 1 || windowDays > 180) return { ok: false, error: 'Clients can book between 1 and 180 days ahead.' };
+    if (input.defaultLocale !== undefined && !isLocale(input.defaultLocale)) return { ok: false, error: 'Pick English, Hindi, Nepali or Bengali for your booking page.' };
     must(await ctx.supabase.from('salons').update({
       booking_enabled: !!input.bookingEnabled, slot_interval_min: interval, booking_lead_min: lead, booking_window_days: windowDays,
+      ...(input.defaultLocale !== undefined ? { default_locale: input.defaultLocale } : {}),
     }).eq('id', ctx.salon.id));
     refresh();
     return { ok: true, message: 'Online booking settings saved' };

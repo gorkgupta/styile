@@ -2,6 +2,7 @@ import { AppShell } from '@/components/app/shell';
 import { getSalonContext } from '@/lib/context';
 import { localDate, zonedToUtc, addDays } from '@/lib/time';
 import { can } from '@/lib/permissions';
+import { I18nRoot } from '@/lib/i18n/root';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,6 +19,7 @@ export default async function SalonLayout({ children }: { children: React.ReactN
       : Promise.resolve({ data: [] as { unread_count: number }[] }),
   ]);
   return (
+    <I18nRoot locale={ctx.locale}>
     <AppShell
       salon={{ id: ctx.salon.id, name: ctx.salon.name, slug: ctx.salon.slug, plan_status: ctx.salon.plan_status }}
       user={{ name: ctx.user.name }}
@@ -29,5 +31,6 @@ export default async function SalonLayout({ children }: { children: React.ReactN
     >
       {children}
     </AppShell>
+    </I18nRoot>
   );
 }

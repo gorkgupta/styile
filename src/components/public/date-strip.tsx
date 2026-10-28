@@ -1,16 +1,9 @@
 'use client';
 import { useEffect, useMemo, useRef } from 'react';
 import { groupSlots, type Slot } from '@/lib/availability';
-import { addDays, dayKeyOf, fmtDateLong, fmtHhmm } from '@/lib/time';
+import { addDays, dateParts, dayKeyOf, fmtDateLong, fmtHhmm } from '@/lib/time';
 import type { Hours } from '@/lib/types';
-
-/** Weekday / day / month of a salon-local date. */
-function dateParts(date: string): { wd: string; dd: string; mon: string } {
-  const [y, m, d] = date.split('-').map(Number);
-  const t = new Date(Date.UTC(y, m - 1, d));
-  const f = (o: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('en-IN', { timeZone: 'UTC', ...o }).format(t);
-  return { wd: f({ weekday: 'short' }), dd: String(d), mon: f({ month: 'short' }) };
-}
+import { useT } from '@/lib/i18n/react';
 
 export function bookableDays(today: string, windowDays: number, hours: Hours | null) {
   return Array.from({ length: windowDays + 1 }, (_, i) => {
@@ -21,6 +14,7 @@ export function bookableDays(today: string, windowDays: number, hours: Hours | n
 
 /** Horizontally scrolling date pills: weekday + date, closed days disabled. */
 export function DateStrip({ today, windowDays, hours, value, onChange }: { today: string; windowDays: number; hours: Hours | null; value: string; onChange: (d: string) => void }) {
+  const t = useT();
   const days = useMemo(() => bookableDays(today, windowDays, hours), [today, windowDays, hours]);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -32,16 +26,16 @@ export function DateStrip({ today, windowDays, hours, value, onChange }: { today
     }
   }, [value]);
   return (
-    <div className="bk-dates" role="group" aria-label="Date" ref={ref}>
+    <div className="bk-dates" role="group" aria-label={t('bk.date')} ref={ref}>
       {days.map((d) => {
-        const { wd, dd, mon } = dateParts(d.date);
-        const label = d.date === today ? 'Today' : d.date === addDays(today, 1) ? 'Tmrw' : wd;
+        const { wd, day: dd, mon } = dateParts(d.date, t.locale);
+        const label = d.date === today ? t('time.today') : d.date === addDays(today, 1) ? t('time.tmrw') : wd;
         return (
           <button key={d.date} type="button" className="bk-date" aria-pressed={value === d.date} disabled={!d.open}
-            onClick={() => onChange(d.date)} aria-label={`${fmtDateLong(d.date)}${d.open ? '' : ', closed'}`}>
+            onClick={() => onChange(d.date)} aria-label={d.open ? fmtDateLong(d.date, t.locale) : t('bk.dayClosedAria', { date: fmtDateLong(d.date, t.locale) })}>
             <span className="bk-date-wd">{label}</span>
             <span className="bk-date-d num">{dd}</span>
-            <span className="bk-date-m">{d.open ? mon : 'Closed'}</span>
+            <span className="bk-date-m">{d.open ? mon : t('bk.closed')}</span>
           </button>
         );
       })}
@@ -51,11 +45,12 @@ export function DateStrip({ today, windowDays, hours, value, onChange }: { today
 
 /** Free times grouped into Morning / Afternoon / Evening. */
 export function SlotGrid({ slots, value, onChange }: { slots: Slot[]; value: string | null; onChange: (s: Slot) => void }) {
+  const t = useT();
   return (
     <div className="stack-lg">
       {groupSlots(slots).map((g) => (
         <div key={g.label} className="stack-sm">
-          <div className="small muted strong">{g.label}</div>
+          <div className="small muted strong">{t(`time.part.${g.part}`)}</div>
           <div className="bk-times">
             {g.slots.map((s) => (
               <button key={s.start} type="button" className="chip bk-time num" aria-pressed={value === s.start} onClick={() => onChange(s)}>{fmtHhmm(s.time)}</button>

@@ -11,7 +11,7 @@ import { money } from '@/lib/billing';
 import { formatPhone } from '@/lib/phone';
 import { fmtDateLong, fmtHhmm, fmtTime, localDate, localTime, minutesToHhmm, zonedToUtc } from '@/lib/time';
 import type { AppointmentFull, ApptStatus, Service, ServiceCategory, Staff } from '@/lib/types';
-import { SOURCE_LABEL } from '@/lib/types';
+import { useT } from '@/lib/i18n/react';
 
 export interface MenuProps { services: Service[]; categories: ServiceCategory[]; staff: Staff[]; tz: string; intervalMin: number }
 
@@ -36,6 +36,7 @@ export function NewAppointmentSheet({ open, onClose, menu, date: initialDate, ti
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const [finding, startFinding] = useTransition();
+  const t = useT();
   const toast = useToast();
   const router = useRouter();
 
@@ -51,18 +52,18 @@ export function NewAppointmentSheet({ open, onClose, menu, date: initialDate, ti
   const isWalkIn = mode === 'walkin';
   const submit = () => start(async () => {
     setError(null);
-    if (!client) return setError('Choose a client.');
-    if (!serviceIds.length) return setError('Pick at least one service.');
+    if (!client) return setError(t('err.chooseClient'));
+    if (!serviceIds.length) return setError(t('err.pickService'));
     if (isWalkIn) {
       const r = await addWalkIn({ customerId: client.id, serviceIds, staffId: staffId || null, notes });
-      if (!r.ok) return setError(r.error);
-      toast(r.message ?? 'Added to queue');
+      if (!r.ok) return setError(t.err(r.error));
+      toast(r.data?.token ? t('queue.tokenAdded', { n: r.data.token }) : t('appt.addedToQueue'));
     } else {
-      if (!staffId) return setError('Choose a stylist.');
-      if (!time) return setError('Pick a time.');
+      if (!staffId) return setError(t('err.chooseStylist'));
+      if (!time) return setError(t('err.pickTime'));
       const r = await createAppointment({ customerId: client.id, serviceIds, staffId, start: zonedToUtc(date, time, menu.tz).toISOString(), notes, notify });
-      if (!r.ok) return setError(r.error);
-      toast('Appointment booked');
+      if (!r.ok) return setError(t.err(r.error));
+      toast(t('appt.booked'));
     }
     router.refresh();
     onClose();
@@ -71,35 +72,35 @@ export function NewAppointmentSheet({ open, onClose, menu, date: initialDate, ti
   const lookForSlots = () => startFinding(async () => {
     setError(null);
     const r = await findSlots({ serviceIds, date, staffId: staffId || null });
-    if (!r.ok) return setError(r.error);
+    if (!r.ok) return setError(t.err(r.error));
     setSlots(r.data ?? []);
   });
 
   return (
-    <Sheet open={open} onClose={onClose} title={isWalkIn ? 'Add walk-in' : 'New appointment'} width={520}
-      footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" loading={pending} onClick={submit}>{isWalkIn ? 'Add to queue' : 'Book appointment'}</Button></>}>
+    <Sheet open={open} onClose={onClose} title={isWalkIn ? t('queue.add') : t('appt.new')} width={520}
+      footer={<><Button variant="ghost" onClick={onClose}>{t('common.cancel')}</Button><Button variant="primary" loading={pending} onClick={submit}>{isWalkIn ? t('appt.addToQueue') : t('appt.book')}</Button></>}>
       <div className="stack-lg">
-        <section className="stack-sm"><span className="label">Client</span><ClientPicker value={client} onChange={setClient} /></section>
-        <section className="stack-sm"><span className="label">Services</span><ServicePicker services={menu.services} categories={menu.categories} value={serviceIds} onChange={setServiceIds} /></section>
-        <StaffSelect staff={menu.staff} value={staffId} onChange={setStaffId} allowAny={isWalkIn} label={isWalkIn ? 'Preferred stylist' : 'Stylist'} />
+        <section className="stack-sm"><span className="label">{t('appt.client')}</span><ClientPicker value={client} onChange={setClient} /></section>
+        <section className="stack-sm"><span className="label">{t('appt.services')}</span><ServicePicker services={menu.services} categories={menu.categories} value={serviceIds} onChange={setServiceIds} /></section>
+        <StaffSelect staff={menu.staff} value={staffId} onChange={setStaffId} allowAny={isWalkIn} label={isWalkIn ? t('appt.preferredStylist') : t('appt.stylist')} />
         {!isWalkIn && (
           <section className="stack-sm">
             <div className="grid-2">
-              <TextField label="Date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+              <TextField label={t('common.date')} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
               <div className="field">
-                <label htmlFor="appt-time">Time</label>
+                <label htmlFor="appt-time">{t('common.time')}</label>
                 <select id="appt-time" className="select" value={time} onChange={(e) => setTime(e.target.value)}>
-                  <option value="">Choose…</option>
+                  <option value="">{t('appt.choose')}</option>
                   {timeOptions(menu.intervalMin).map((t) => <option key={t} value={t}>{fmtHhmm(t)}</option>)}
                 </select>
               </div>
             </div>
-            <Button size="sm" icon="search" loading={finding} disabled={!serviceIds.length} onClick={lookForSlots}>Show free times</Button>
+            <Button size="sm" icon="search" loading={finding} disabled={!serviceIds.length} onClick={lookForSlots}>{t('appt.showFree')}</Button>
             {slots && (slots.length ? (
               <div className="stack-sm">
                 {groupSlots(slots).map((g) => (
                   <div key={g.label} className="stack-sm">
-                    <div className="tiny muted">{g.label}</div>
+                    <div className="tiny muted">{t(`time.part.${g.part}`)}</div>
                     <div className="row-wrap">
                       {g.slots.map((s) => (
                         <button key={s.time} type="button" className="chip num" aria-pressed={time === s.time && (!staffId || s.staffIds.includes(staffId))}
@@ -111,21 +112,21 @@ export function NewAppointmentSheet({ open, onClose, menu, date: initialDate, ti
                   </div>
                 ))}
               </div>
-            ) : <p className="small muted">No free time for these services on {fmtDateLong(date)}.</p>)}
+            ) : <p className="small muted">{t('appt.noFree', { date: fmtDateLong(date, t.locale) })}</p>)}
           </section>
         )}
-        <TextArea label="Notes" placeholder="Allergies, colour formula, preferences" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
-        {!isWalkIn && <Switch label="Send WhatsApp confirmation to the client" checked={notify} onChange={setNotify} />}
+        <TextArea label={t('common.notes')} placeholder={t('appt.notesPh')} value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
+        {!isWalkIn && <Switch label={t('appt.sendWa')} checked={notify} onChange={setNotify} />}
         {error && <Notice tone="error">{error}</Notice>}
       </div>
     </Sheet>
   );
 }
 
-const NEXT_ACTIONS: Partial<Record<ApptStatus, { status: ApptStatus; label: string; variant: 'primary' | 'secondary' }[]>> = {
-  booked: [{ status: 'checked_in', label: 'Client arrived', variant: 'primary' }, { status: 'confirmed', label: 'Mark confirmed', variant: 'secondary' }],
-  confirmed: [{ status: 'checked_in', label: 'Client arrived', variant: 'primary' }],
-  checked_in: [{ status: 'in_service', label: 'Start service', variant: 'primary' }],
+const NEXT_ACTIONS: Partial<Record<ApptStatus, { status: ApptStatus; label: 'appt.arrived' | 'appt.markConfirmed' | 'appt.start'; variant: 'primary' | 'secondary' }[]>> = {
+  booked: [{ status: 'checked_in', label: 'appt.arrived', variant: 'primary' }, { status: 'confirmed', label: 'appt.markConfirmed', variant: 'secondary' }],
+  confirmed: [{ status: 'checked_in', label: 'appt.arrived', variant: 'primary' }],
+  checked_in: [{ status: 'in_service', label: 'appt.start', variant: 'primary' }],
 };
 
 /** Details of one appointment with the actions the front desk needs. */
@@ -136,6 +137,7 @@ export function AppointmentSheet({ appt, onClose, menu, canBill }: { appt: Appoi
   const [moveDate, setMoveDate] = useState('');
   const [moveTime, setMoveTime] = useState('');
   const [moveStaff, setMoveStaff] = useState('');
+  const t = useT();
   const toast = useToast();
   const router = useRouter();
 
@@ -153,7 +155,7 @@ export function AppointmentSheet({ appt, onClose, menu, canBill }: { appt: Appoi
   const total = appt.services.reduce((s, x) => s + Number(x.price), 0);
   const act = (status: ApptStatus, reason?: string) => start(async () => {
     const r = await setAppointmentStatus(appt.id, status, reason);
-    if (!r.ok) return toast(r.error, 'error');
+    if (!r.ok) return toast(t.err(r.error), 'error');
     router.refresh();
     onClose();
   });
@@ -166,88 +168,88 @@ export function AppointmentSheet({ appt, onClose, menu, canBill }: { appt: Appoi
         footer={!finished && (
           <>
             {appt.status === 'in_service' && canBill && (
-              <Link className="btn btn-primary" href={appt.event_id ? `/app/pos?event=${appt.event_id}` : `/app/pos?appointment=${appt.id}`}><Icon name="receipt" />Check out</Link>
+              <Link className="btn btn-primary" href={appt.event_id ? `/app/pos?event=${appt.event_id}` : `/app/pos?appointment=${appt.id}`}><Icon name="receipt" />{t('appt.checkOut')}</Link>
             )}
             {(NEXT_ACTIONS[appt.status] ?? []).map((a) => (
-              <Button key={a.status} variant={a.variant} loading={pending} onClick={() => act(a.status)}>{a.label}</Button>
+              <Button key={a.status} variant={a.variant} loading={pending} onClick={() => act(a.status)}>{t(a.label)}</Button>
             ))}
             {['checked_in'].includes(appt.status) && canBill && (
-              <Link className="btn btn-secondary" href={appt.event_id ? `/app/pos?event=${appt.event_id}` : `/app/pos?appointment=${appt.id}`}>Check out</Link>
+              <Link className="btn btn-secondary" href={appt.event_id ? `/app/pos?event=${appt.event_id}` : `/app/pos?appointment=${appt.id}`}>{t('appt.checkOut')}</Link>
             )}
           </>
         )}>
         <div className="stack-lg">
           <div className="stack-sm">
-            <div className="row"><Icon name="clock" size={17} className="muted" /><span className="num">{fmtDateLong(localDate(new Date(appt.start_at), menu.tz))} · {fmtTime(appt.start_at, menu.tz)} – {fmtTime(appt.end_at, menu.tz)}</span></div>
-            <div className="row"><span className="dot" style={{ background: stylist?.color ?? '#999', marginLeft: 4, marginRight: 4 }} /><span>{stylist?.name ?? 'Any stylist'}</span></div>
+            <div className="row"><Icon name="clock" size={17} className="muted" /><span className="num">{fmtDateLong(localDate(new Date(appt.start_at), menu.tz), t.locale)} · {fmtTime(appt.start_at, menu.tz)} – {fmtTime(appt.end_at, menu.tz)}</span></div>
+            <div className="row"><span className="dot" style={{ background: stylist?.color ?? '#999', marginLeft: 4, marginRight: 4 }} /><span>{stylist?.name ?? t('appt.anyStylist')}</span></div>
             <div className="row"><Icon name="phone" size={17} className="muted" /><a href={`tel:+${appt.customer.phone}`}>{formatPhone(appt.customer.phone)}</a>
-              <a className="btn btn-ghost btn-sm" href={waLink} target="_blank" rel="noreferrer"><Icon name="whatsapp" size={16} />WhatsApp</a></div>
+              <a className="btn btn-ghost btn-sm" href={waLink} target="_blank" rel="noreferrer"><Icon name="whatsapp" size={16} />{t('source.whatsapp')}</a></div>
             {appt.event_id && (
               <div className="row"><Icon name="heart" size={17} className="adv-title-icon" />
-                <span>{appt.guest_name ? <strong>{appt.guest_name}</strong> : null}{appt.guest_name ? ' · ' : ''}part of an event</span>
-                <Link className="btn btn-ghost btn-sm" href={`/app/events/${appt.event_id}`}>Open event</Link></div>
+                <span>{appt.guest_name ? <strong>{appt.guest_name}</strong> : null}{appt.guest_name ? ' · ' : ''}{t('appt.partOfEvent')}</span>
+                <Link className="btn btn-ghost btn-sm" href={`/app/events/${appt.event_id}`}>{t('appt.openEvent')}</Link></div>
             )}
             <div className="row-wrap">
-              <Badge tone="outline">{SOURCE_LABEL[appt.source]}</Badge>
-              {appt.token_no && <Badge tone="marigold">Token {appt.token_no}</Badge>}
-              <Badge>{appt.customer.visit_count ? `${appt.customer.visit_count} past visits` : 'First visit'}</Badge>
+              <Badge tone="outline">{t(`source.${appt.source}`)}</Badge>
+              {appt.token_no && <Badge tone="marigold">{t('appt.token', { n: appt.token_no })}</Badge>}
+              <Badge>{appt.customer.visit_count ? t('appt.pastVisits', { count: appt.customer.visit_count }) : t('appt.firstVisit')}</Badge>
             </div>
           </div>
 
           <div className="panel">
             <ul className="list">
               {appt.services.map((s, i) => (
-                <li key={i} className="between"><span>{s.name} <span className="muted small">· {s.duration_min} min</span></span><span className="num">{money(s.price)}</span></li>
+                <li key={i} className="between"><span>{s.name} <span className="muted small">· {t('time.min', { m: s.duration_min })}</span></span><span className="num">{money(s.price)}</span></li>
               ))}
-              <li className="between strong"><span>Estimated total</span><span className="num">{money(total)}</span></li>
+              <li className="between strong"><span>{t('appt.estTotal')}</span><span className="num">{money(total)}</span></li>
             </ul>
           </div>
 
           {(appt.notes || appt.customer.notes) && (
             <div className="stack-sm">
               {appt.notes && <Notice>{appt.notes}</Notice>}
-              {appt.customer.notes && <div className="small ink2"><span className="strong">Client notes: </span>{appt.customer.notes}</div>}
+              {appt.customer.notes && <div className="small ink2"><span className="strong">{t('appt.clientNotes')} </span>{appt.customer.notes}</div>}
             </div>
           )}
-          {appt.status === 'cancelled' && appt.cancelled_reason && <Notice tone="warn">Cancelled: {appt.cancelled_reason}</Notice>}
+          {appt.status === 'cancelled' && appt.cancelled_reason && <Notice tone="warn">{t('appt.cancelledReason', { reason: appt.cancelled_reason })}</Notice>}
 
           {!finished && (
             moving ? (
               <div className="panel stack" style={{ padding: 14 }}>
-                <h3>Move appointment</h3>
+                <h3>{t('appt.moveTitle')}</h3>
                 <div className="grid-2">
-                  <TextField label="Date" type="date" value={moveDate} onChange={(e) => setMoveDate(e.target.value)} />
-                  <div className="field"><label htmlFor="mv-time">Time</label>
+                  <TextField label={t('common.date')} type="date" value={moveDate} onChange={(e) => setMoveDate(e.target.value)} />
+                  <div className="field"><label htmlFor="mv-time">{t('common.time')}</label>
                     <select id="mv-time" className="select" value={moveTime} onChange={(e) => setMoveTime(e.target.value)}>
                       {timeOptions(menu.intervalMin).map((t) => <option key={t} value={t}>{fmtHhmm(t)}</option>)}
                     </select></div>
                 </div>
-                <StaffSelect staff={menu.staff} value={moveStaff} onChange={setMoveStaff} />
+                <StaffSelect staff={menu.staff} value={moveStaff} onChange={setMoveStaff} label={t('appt.stylist')} />
                 <div className="row">
                   <Button variant="primary" loading={pending} onClick={() => start(async () => {
                     const r = await moveAppointment(appt.id, { start: zonedToUtc(moveDate, moveTime, menu.tz).toISOString(), staffId: moveStaff });
-                    if (!r.ok) return toast(r.error, 'error');
-                    toast('Appointment moved'); router.refresh(); onClose();
-                  })}>Save new time</Button>
-                  <Button variant="ghost" onClick={() => setMoving(false)}>Keep current time</Button>
+                    if (!r.ok) return toast(t.err(r.error), 'error');
+                    toast(t('appt.moved')); router.refresh(); onClose();
+                  })}>{t('appt.saveTime')}</Button>
+                  <Button variant="ghost" onClick={() => setMoving(false)}>{t('pt.keepTime')}</Button>
                 </div>
               </div>
             ) : (
               <div className="row-wrap">
-                <Button size="sm" icon="calendar" onClick={() => setMoving(true)}>Move</Button>
-                {['booked', 'confirmed'].includes(appt.status) && <Button size="sm" onClick={() => act('no_show')}>No-show</Button>}
-                <Button size="sm" variant="danger" onClick={() => setConfirmCancel(true)}>Cancel appointment</Button>
+                <Button size="sm" icon="calendar" onClick={() => setMoving(true)}>{t('appt.move')}</Button>
+                {['booked', 'confirmed'].includes(appt.status) && <Button size="sm" onClick={() => act('no_show')}>{t('status.no_show')}</Button>}
+                <Button size="sm" variant="danger" onClick={() => setConfirmCancel(true)}>{t('appt.cancel')}</Button>
               </div>
             )
           )}
-          {appt.invoice_id && <Link href={`/app/invoices/${appt.invoice_id}`} className="btn btn-secondary btn-sm" style={{ alignSelf: 'flex-start' }}><Icon name="receipt" size={16} />View bill</Link>}
-          {appt.status === 'no_show' && <Button size="sm" onClick={() => act('booked')}>Undo no-show</Button>}
+          {appt.invoice_id && <Link href={`/app/invoices/${appt.invoice_id}`} className="btn btn-secondary btn-sm" style={{ alignSelf: 'flex-start' }}><Icon name="receipt" size={16} />{t('appt.viewBill')}</Link>}
+          {appt.status === 'no_show' && <Button size="sm" onClick={() => act('booked')}>{t('appt.undoNoShow')}</Button>}
         </div>
       </Sheet>
-      <Dialog open={confirmCancel} onClose={() => setConfirmCancel(false)} title="Cancel this appointment?"
-        footer={<><Button variant="ghost" onClick={() => setConfirmCancel(false)}>Keep it</Button>
-          <Button variant="danger" loading={pending} onClick={() => { setConfirmCancel(false); act('cancelled', 'Cancelled by salon'); }}>Cancel appointment</Button></>}>
-        <p className="ink2">{appt.customer.name}&apos;s slot will be freed for other bookings.</p>
+      <Dialog open={confirmCancel} onClose={() => setConfirmCancel(false)} title={t('appt.cancelTitle')}
+        footer={<><Button variant="ghost" onClick={() => setConfirmCancel(false)}>{t('appt.keepIt')}</Button>
+          <Button variant="danger" loading={pending} onClick={() => { setConfirmCancel(false); act('cancelled', 'Cancelled by salon'); }}>{t('appt.cancel')}</Button></>}>
+        <p className="ink2">{t('appt.cancelBody', { name: appt.customer.name })}</p>
       </Dialog>
     </>
   );

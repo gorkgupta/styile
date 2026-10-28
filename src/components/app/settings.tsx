@@ -6,6 +6,7 @@ import { Badge, Button, Notice, Panel, Segmented, SelectField, Switch, TextArea,
 import { Icon, type IconName } from '@/components/ui/icons';
 import { Topbar } from './shell';
 import { HoursEditor } from './hours-editor';
+import { LOCALES, LOCALE_NAMES } from '@/lib/i18n/locales';
 import { updateAssistant, updateBilling, updateBusinessHours, updateCoinSettings, updateOnlineBooking, updatePayments, updateSalonProfile } from '@/actions/settings';
 import { UpiQr } from '@/components/ui/upi-qr';
 import { BHUTAN_UPI_LIMITS, isValidVpa } from '@/lib/upi';
@@ -425,6 +426,7 @@ function BookingSection({ salon }: { salon: Salon }) {
   const [slotInterval, setSlotInterval] = useState(String(salon.slot_interval_min));
   const [lead, setLead] = useState(String(salon.booking_lead_min));
   const [windowDays, setWindowDays] = useState(String(salon.booking_window_days));
+  const [clientLang, setClientLang] = useState<string>(salon.default_locale ?? 'en');
   const [origin, setOrigin] = useState('');
   const { pending, error, run } = useSave();
   const toast = useToast();
@@ -439,7 +441,7 @@ function BookingSection({ salon }: { salon: Salon }) {
   return (
     <Section id="booking" title="Online booking" description="Clients pick a service, stylist and time on your booking page — no app or login needed."
       footer={<SaveBar pending={pending} error={error}
-        onSave={() => run(() => updateOnlineBooking({ bookingEnabled: enabled, slotIntervalMin: Number(slotInterval), bookingLeadMin: Number(lead), bookingWindowDays: Number(windowDays) }))} />}>
+        onSave={() => run(() => updateOnlineBooking({ bookingEnabled: enabled, slotIntervalMin: Number(slotInterval), bookingLeadMin: Number(lead), bookingWindowDays: Number(windowDays), defaultLocale: clientLang }))} />}>
       <div className="stack">
         <div className="link-box">
           <Icon name="link" size={18} className="muted" />
@@ -466,6 +468,10 @@ function BookingSection({ salon }: { salon: Salon }) {
             {windowOptions.map((d) => <option key={d} value={d}>{d} days ahead</option>)}
           </SelectField>
         </div>
+        <SelectField label="Language for clients" value={clientLang} onChange={(e) => setClientLang(e.target.value)}
+          hint="Your booking page, clients’ bookings page, bills and receipts open in this language. Clients can switch it from the page. WhatsApp messages stay in English for now.">
+          {LOCALES.map((l) => <option key={l} value={l}>{LOCALE_NAMES[l]}{l !== 'en' ? ` (${({ hi: 'Hindi', ne: 'Nepali', bn: 'Bengali' } as Record<string, string>)[l]})` : ''}</option>)}
+        </SelectField>
       </div>
     </Section>
   );

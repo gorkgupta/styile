@@ -4,6 +4,7 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { Field } from './ui';
 import { Icon } from './icons';
+import { useT } from '@/lib/i18n/react';
 import {
   OTHER_COUNTRY, OTHER_EXAMPLE, PHONE_COUNTRIES, normalizePhone, phoneCountry, phoneDraftFromTyping, phoneDraftWithCountry,
   readPhoneDraft, writePhoneDraft, type PhoneDraft,
@@ -27,9 +28,11 @@ export interface PhoneInputProps {
   onKeyDown?: (e: KeyboardEvent<HTMLInputElement>) => void;
 }
 
-export function PhoneInput({ label = 'Mobile number', value, defaultValue, onChange, name, id, hint, error, autoFocus, required, defaultCountry = '91', onKeyDown }: PhoneInputProps) {
+export function PhoneInput({ label, value, defaultValue, onChange, name, id, hint, error, autoFocus, required, defaultCountry = '91', onKeyDown }: PhoneInputProps) {
   const auto = useId();
+  const t = useT();
   const fid = id ?? auto;
+  label ??= t('common.mobileNumber');
   const [draft, setDraft] = useState<PhoneDraft>(() => readPhoneDraft(value ?? defaultValue ?? '', defaultCountry));
   // The parent's value round-trips through readPhoneDraft only when it changes from outside (form reset, prefill).
   const emitted = useRef(value ?? defaultValue ?? '');
@@ -57,9 +60,9 @@ export function PhoneInput({ label = 'Mobile number', value, defaultValue, onCha
         <span className="phone-cc">
           <span aria-hidden>{other ? '+…' : `+${draft.code}`}</span>
           <Icon name="chevronDown" size={14} />
-          <select aria-label="Country code" value={draft.code} onChange={(e) => update(phoneDraftWithCountry(e.target.value, draft))}>
-            {PHONE_COUNTRIES.map((c) => <option key={c.code} value={c.code}>+{c.code} {c.name}</option>)}
-            <option value={OTHER_COUNTRY}>Other country</option>
+          <select aria-label={t('phone.countryCode')} value={draft.code} onChange={(e) => update(phoneDraftWithCountry(e.target.value, draft))}>
+            {PHONE_COUNTRIES.map((c) => <option key={c.code} value={c.code}>+{c.code} {t(`country.${c.code as '91' | '975' | '977' | '880'}`)}</option>)}
+            <option value={OTHER_COUNTRY}>{t('phone.otherCountry')}</option>
           </select>
         </span>
         <input id={fid} className="input num" type="tel" inputMode="tel" autoComplete="tel" autoFocus={autoFocus} required={required}

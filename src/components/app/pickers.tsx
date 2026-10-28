@@ -7,6 +7,8 @@ import { searchClients, quickCreateClient, type ClientLite } from '@/actions/app
 import { money } from '@/lib/billing';
 import { formatPhone } from '@/lib/phone';
 import type { Service, ServiceCategory, Staff } from '@/lib/types';
+import { useT } from '@/lib/i18n/react';
+import { fmtDurationT } from '@/lib/i18n/core';
 
 /** Find an existing client by name or phone, or add a new one inline. */
 export function ClientPicker({ value, onChange }: { value: ClientLite | null; onChange: (c: ClientLite | null) => void }) {
@@ -17,6 +19,7 @@ export function ClientPicker({ value, onChange }: { value: ClientLite | null; on
   const [phone, setPhone] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const t = useT();
   const toast = useToast();
 
   useEffect(() => {
@@ -33,9 +36,9 @@ export function ClientPicker({ value, onChange }: { value: ClientLite | null; on
         <Avatar name={value.name} />
         <div className="grow">
           <div className="strong">{value.name}</div>
-          <div className="small muted">{formatPhone(value.phone)} · {value.visit_count ? `${value.visit_count} visits` : 'New client'}</div>
+          <div className="small muted">{formatPhone(value.phone)} · {value.visit_count ? t('common.visits', { count: value.visit_count }) : t('cl.new')}</div>
         </div>
-        <Button size="sm" variant="ghost" onClick={() => onChange(null)}>Change</Button>
+        <Button size="sm" variant="ghost" onClick={() => onChange(null)}>{t('common.change')}</Button>
       </div>
     );
   }
@@ -43,24 +46,24 @@ export function ClientPicker({ value, onChange }: { value: ClientLite | null; on
   if (adding) {
     return (
       <div className="panel stack" style={{ padding: 14 }}>
-        <div className="between"><h3>New client</h3><Button size="sm" variant="ghost" onClick={() => setAdding(false)}>Search instead</Button></div>
+        <div className="between"><h3>{t('cl.newClient')}</h3><Button size="sm" variant="ghost" onClick={() => setAdding(false)}>{t('cl.searchInstead')}</Button></div>
         <div className="grid-2">
-          <TextField label="Name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
-          <PhoneInput label="Mobile number" value={phone} onChange={(v) => setPhone(v)} error={error} />
+          <TextField label={t('common.name')} value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+          <PhoneInput label={t('common.mobileNumber')} value={phone} onChange={(v) => setPhone(v)} error={error} />
         </div>
         <Button variant="primary" loading={pending} onClick={() => start(async () => {
           const r = await quickCreateClient({ name, phone });
-          if (!r.ok) { setError(r.error); return; }
-          if (r.message) toast(r.message);
+          if (!r.ok) { setError(t.err(r.error)); return; }
+          if (r.message) toast(t.err(r.message));
           onChange(r.data!);
-        })}>Add client</Button>
+        })}>{t('cl.add')}</Button>
       </div>
     );
   }
 
   return (
     <div className="stack-sm">
-      <SearchInput value={query} onChange={setQuery} placeholder="Search by name or phone" />
+      <SearchInput value={query} onChange={setQuery} placeholder={t('cl.searchPh')} />
       <ul className="list panel" style={{ maxHeight: 240, overflowY: 'auto' }}>
         {results.map((c) => (
           <li key={c.id} style={{ padding: 0 }}>
@@ -72,13 +75,13 @@ export function ClientPicker({ value, onChange }: { value: ClientLite | null; on
             </button>
           </li>
         ))}
-        {!results.length && <li className="small muted">{query ? 'No client matches. Add them as new.' : 'Start typing to find a client.'}</li>}
+        {!results.length && <li className="small muted">{query ? t('cl.noMatchAdd') : t('cl.startTyping')}</li>}
       </ul>
       <Button icon="plus" onClick={() => {
         setAdding(true);
         const digits = query.replace(/\D/g, '');
         if (digits.length >= 6) setPhone(query); else setName(query);
-      }}>New client</Button>
+      }}>{t('cl.newClient')}</Button>
     </div>
   );
 }
@@ -88,19 +91,20 @@ export function ServicePicker({ services, categories, value, onChange }: {
   services: Service[]; categories: ServiceCategory[]; value: string[]; onChange: (ids: string[]) => void;
 }) {
   const [q, setQ] = useState('');
+  const t = useT();
   const groups = useMemo(() => {
     const filtered = services.filter((s) => s.active && s.name.toLowerCase().includes(q.toLowerCase()));
     const byCat = categories.map((c) => ({ id: c.id, name: c.name, items: filtered.filter((s) => s.category_id === c.id) }));
     const other = filtered.filter((s) => !s.category_id || !categories.some((c) => c.id === s.category_id));
-    if (other.length) byCat.push({ id: 'other', name: 'Other', items: other });
+    if (other.length) byCat.push({ id: 'other', name: t('common.other'), items: other });
     return byCat.filter((g) => g.items.length);
-  }, [services, categories, q]);
+  }, [services, categories, q, t]);
   const toggle = (id: string) => onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id]);
   const chosen = value.map((id) => services.find((s) => s.id === id)).filter(Boolean) as Service[];
 
   return (
     <div className="stack-sm">
-      {services.length > 8 && <SearchInput value={q} onChange={setQ} placeholder="Find a service" />}
+      {services.length > 8 && <SearchInput value={q} onChange={setQ} placeholder={t('appt.findService')} />}
       {groups.map((g) => (
         <div key={g.id} className="stack-sm">
           <div className="tiny muted">{g.name}</div>
@@ -117,21 +121,22 @@ export function ServicePicker({ services, categories, value, onChange }: {
       ))}
       {chosen.length > 0 && (
         <div className="small ink2 num">
-          {chosen.length} service{chosen.length > 1 ? 's' : ''} · {chosen.reduce((s, x) => s + x.duration_min, 0)} min · {money(chosen.reduce((s, x) => s + Number(x.price), 0))}
+          {t('common.services', { count: chosen.length })} · {fmtDurationT(t, chosen.reduce((s, x) => s + x.duration_min, 0))} · {money(chosen.reduce((s, x) => s + Number(x.price), 0))}
         </div>
       )}
     </div>
   );
 }
 
-export function StaffSelect({ staff, value, onChange, allowAny, label = 'Stylist' }: {
+export function StaffSelect({ staff, value, onChange, allowAny, label }: {
   staff: Staff[]; value: string; onChange: (id: string) => void; allowAny?: boolean; label?: string;
 }) {
+  const t = useT();
   return (
     <div className="field">
-      <span className="label">{label}</span>
+      <span className="label">{label ?? t('appt.stylist')}</span>
       <div className="row-wrap">
-        {allowAny && <button type="button" className="chip" aria-pressed={value === ''} onClick={() => onChange('')}>Anyone free</button>}
+        {allowAny && <button type="button" className="chip" aria-pressed={value === ''} onClick={() => onChange('')}>{t('appt.anyoneFree')}</button>}
         {staff.filter((s) => s.active).map((s) => (
           <button key={s.id} type="button" className="chip" aria-pressed={value === s.id} onClick={() => onChange(s.id)}>
             <span className="dot" style={{ background: s.color }} />{s.name}

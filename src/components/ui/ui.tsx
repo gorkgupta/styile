@@ -6,7 +6,7 @@ import { useFormStatus } from 'react-dom';
 import { Icon, type IconName } from './icons';
 import { initials } from '@/lib/phone';
 import type { ApptStatus } from '@/lib/types';
-import { STATUS_LABEL } from '@/lib/types';
+import { useT } from '@/lib/i18n/react';
 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ');
 export { cx };
@@ -66,7 +66,9 @@ export function Switch({ label, checked, onChange, name, defaultChecked, disable
     </label>
   );
 }
-export function SearchInput({ value, onChange, placeholder = 'Search', autoFocus }: { value: string; onChange: (v: string) => void; placeholder?: string; autoFocus?: boolean }) {
+export function SearchInput({ value, onChange, placeholder, autoFocus }: { value: string; onChange: (v: string) => void; placeholder?: string; autoFocus?: boolean }) {
+  const t = useT();
+  placeholder ??= t('common.search');
   return (
     <div className="input-group">
       <span className="icon-left"><Icon name="search" size={17} /></span>
@@ -87,7 +89,8 @@ const STATUS_TONE: Record<ApptStatus, Tone> = {
   completed: 'success', cancelled: 'danger', no_show: 'danger',
 };
 export function StatusBadge({ status }: { status: ApptStatus }) {
-  return <Badge tone={STATUS_TONE[status]}>{STATUS_LABEL[status]}</Badge>;
+  const t = useT();
+  return <Badge tone={STATUS_TONE[status]}>{t(`status.${status}`)}</Badge>;
 }
 
 /** Initials on the person's colour, or their photo when there is one (initials show if the photo can't load). */
@@ -154,6 +157,7 @@ function useEscape(onClose: () => void, open: boolean) {
 
 export function Sheet({ open, onClose, title, children, footer, width }: { open: boolean; onClose: () => void; title: ReactNode; children: ReactNode; footer?: ReactNode; width?: number }) {
   useEscape(onClose, open);
+  const t = useT();
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => { if (open) ref.current?.focus(); }, [open]);
   if (!open) return null;
@@ -161,7 +165,7 @@ export function Sheet({ open, onClose, title, children, footer, width }: { open:
     <>
       <div className="scrim" onClick={onClose} />
       <div className="sheet" role="dialog" aria-modal="true" aria-label={typeof title === 'string' ? title : undefined} tabIndex={-1} ref={ref} style={width ? { width: `min(${width}px, 100vw)` } : undefined}>
-        <div className="sheet-head">{typeof title === 'string' ? <h2>{title}</h2> : title}<Button variant="ghost" icon="x" onClick={onClose} aria-label="Close" /></div>
+        <div className="sheet-head">{typeof title === 'string' ? <h2>{title}</h2> : title}<Button variant="ghost" icon="x" onClick={onClose} aria-label={t('common.close')} /></div>
         <div className="sheet-body">{children}</div>
         {footer && <div className="sheet-foot">{footer}</div>}
       </div>

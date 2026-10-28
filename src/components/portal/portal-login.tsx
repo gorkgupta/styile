@@ -10,10 +10,12 @@ import { safeNextPath } from '@/lib/safe-next';
 import { usePhoneOtp } from '@/components/public/phone-otp';
 import { PhoneInput } from '@/components/ui/phone-input';
 import { PortalHeader } from './portal';
+import { useT } from '@/lib/i18n/react';
 
 /** Client sign-in with a WhatsApp code. After verifying, links this number's client records across salons. */
 export function PortalLogin({ next, base, salonName }: { next?: string; base: string; salonName: string }) {
   const otp = usePhoneOtp();
+  const t = useT();
   const router = useRouter();
   const [finishing, setFinishing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -25,7 +27,7 @@ export function PortalLogin({ next, base, salonName }: { next?: string; base: st
     if (!(await otp.verify())) return;
     setFinishing(true);
     const r = await claimMyProfiles();
-    if (!r.ok) { setFinishing(false); setError(r.error); return; }
+    if (!r.ok) { setFinishing(false); setError(t.err(r.error)); return; }
     router.replace(safeNextPath(next) ?? `${base}/me`);
     router.refresh();
   }
@@ -37,21 +39,21 @@ export function PortalLogin({ next, base, salonName }: { next?: string; base: st
         <div className="pt-login-card">
           <div className="pt-login-icon"><Icon name="whatsapp" size={26} /></div>
           <div className="stack-sm" style={{ textAlign: 'center' }}>
-            <h1>See your bookings</h1>
-            <p className="muted">Use the mobile number you book with. We’ll send a 6-digit code on WhatsApp.</p>
+            <h1>{t('pt.loginTitle')}</h1>
+            <p className="muted">{t('pt.loginBody')}</p>
           </div>
           <form onSubmit={submit} className="stack" style={{ width: '100%' }}>
             {otp.stage === 'phone' ? (
-              <PhoneInput id="pt-phone" label="Mobile number" value={otp.phoneInput} onChange={otp.setPhoneInput} error={otp.error} autoFocus />
+              <PhoneInput id="pt-phone" label={t('common.mobileNumber')} value={otp.phoneInput} onChange={otp.setPhoneInput} error={otp.error} autoFocus />
             ) : (
               <div className="field">
-                <label htmlFor="pt-code">Code sent to {formatPhone(otp.digits)}</label>
+                <label htmlFor="pt-code">{t('otp.codeSentTo', { phone: formatPhone(otp.digits) })}</label>
                 <input id="pt-code" className="input bk-code num" inputMode="numeric" autoComplete="one-time-code" placeholder="••••••" maxLength={6}
                   value={otp.code} onChange={(e) => otp.setCode(e.target.value)} autoFocus aria-invalid={!!otp.error || undefined} />
-                {otp.error ? <span className="error-text" role="alert">{otp.error}</span> : <span className="hint">Check WhatsApp for a message from Styile.</span>}
+                {otp.error ? <span className="error-text" role="alert">{otp.error}</span> : <span className="hint">{t('otp.checkWa')}</span>}
                 <div className="row-wrap" style={{ gap: 4, justifyContent: 'center' }}>
-                  <Button size="sm" variant="ghost" onClick={otp.changeNumber}>Change number</Button>
-                  <Button size="sm" variant="ghost" disabled={otp.resendIn > 0} onClick={() => otp.send()}>{otp.resendIn > 0 ? `Resend in ${otp.resendIn}s` : 'Resend code'}</Button>
+                  <Button size="sm" variant="ghost" onClick={otp.changeNumber}>{t('otp.changeNumber')}</Button>
+                  <Button size="sm" variant="ghost" disabled={otp.resendIn > 0} onClick={() => otp.send()}>{otp.resendIn > 0 ? t('otp.resendIn', { s: otp.resendIn }) : t('otp.resend')}</Button>
                 </div>
               </div>
             )}
@@ -59,11 +61,11 @@ export function PortalLogin({ next, base, salonName }: { next?: string; base: st
             <Button type="submit" variant="primary" size="lg" block loading={otp.busy || finishing}
               icon={otp.stage === 'phone' ? 'whatsapp' : undefined}
               disabled={otp.stage === 'phone' ? !otp.valid : otp.code.length !== 6}>
-              {otp.stage === 'phone' ? 'Send code on WhatsApp' : 'Verify and continue'}
+              {otp.stage === 'phone' ? t('otp.send') : t('otp.verify')}
             </Button>
           </form>
         </div>
-        <p className="small muted" style={{ textAlign: 'center' }}>Work at a salon? <Link href="/login">Staff log in</Link></p>
+        <p className="small muted" style={{ textAlign: 'center' }}>{t('pt.workHere')} <Link href="/login">{t('pt.staffLogin')}</Link></p>
       </main>
     </div>
   );

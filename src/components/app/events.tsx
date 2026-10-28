@@ -18,6 +18,8 @@ import { dayText } from '@/lib/packages';
 import { formatPhone } from '@/lib/phone';
 import { fmtDateYear } from '@/lib/periods';
 import { addDays, fmtDateLong, fmtTime, localDate, localTime, zonedToUtc } from '@/lib/time';
+import { useT } from '@/lib/i18n/react';
+import { dayTextT } from '@/lib/i18n/format';
 import { MONEY_METHODS, METHOD_LABEL, type AdvancePayment, type ApptStatus, type EventType, type GstMode, type PayMethod, type SalonEvent } from '@/lib/types';
 
 const moneyMethods = (enabled?: PayMethod[]) => deskMethods(enabled).filter((m) => MONEY_METHODS.includes(m) && m !== 'other');
@@ -312,14 +314,15 @@ export function EventDetail(p: EventDetailProps) {
 export function AdvanceReceipt({ advance: a, salon, customer, event, tz, sent }: {
   advance: AdvancePayment; salon: ReceiptSalon; customer: { name: string; phone: string }; event: Pick<SalonEvent, 'title' | 'event_at' | 'event_type'> | null; tz: string; sent?: boolean;
 }) {
+  const t = useT();
   return (
     <div className="stack-lg coin-receipt adv-receipt">
       {sent !== undefined && (
         <div className="coin-receipt-head">
           <span className="coin-receipt-icon"><Icon name="check" size={22} /></span>
           <div>
-            <div className="strong">{money(a.amount)} advance received from {customer.name}</div>
-            <div className="small muted">{sent ? `Receipt sent to ${customer.name.split(' ')[0]} on WhatsApp` : 'Saved on the event'}</div>
+            <div className="strong">{t('rcpt.advReceivedFrom', { money: money(a.amount), name: customer.name })}</div>
+            <div className="small muted">{sent ? t('rcpt.sentOnWa', { name: customer.name.split(' ')[0] }) : t('rcpt.savedOnEvent')}</div>
           </div>
         </div>
       )}
@@ -327,19 +330,19 @@ export function AdvanceReceipt({ advance: a, salon, customer, event, tz, sent }:
         <div className="strong">{salon.name}</div>
         {salon.address && <div className="tiny muted">{salon.address}</div>}
         {salon.gstMode !== 'unregistered' && salon.gstin && <div className="tiny muted">GSTIN {salon.gstin}</div>}
-        <div className="adv-receipt-kind">Advance receipt</div>
+        <div className="adv-receipt-kind">{t('rcpt.advTitle')}</div>
       </div>
       <dl className="coin-receipt-lines">
-        <div><dt>Receipt no.</dt><dd className="num strong">{a.receipt_no}</dd></div>
-        <div><dt>Date</dt><dd className="num">{fmtDateYear(a.received_at, tz)}, {fmtTime(a.received_at, tz)}</dd></div>
-        <div><dt>Received from</dt><dd>{customer.name}<span className="muted num"> · {formatPhone(customer.phone)}</span></dd></div>
-        {event && <div><dt>For</dt><dd>{event.title} · {dayText(localDate(new Date(event.event_at), tz))}</dd></div>}
-        <div><dt>Paid by</dt><dd>{METHOD_LABEL[a.method]}{a.reference ? <span className="muted"> · {a.reference}</span> : null}</dd></div>
-        {a.refund_amount ? <div><dt>Handed back</dt><dd className="num danger-text">{money(a.refund_amount)} on {fmtDateYear(a.refunded_at!, tz)}</dd></div> : null}
-        <div className="coin-receipt-total"><dt>Advance received</dt><dd className="num">{money(a.amount)}</dd></div>
+        <div><dt>{t('rcpt.no')}</dt><dd className="num strong">{a.receipt_no}</dd></div>
+        <div><dt>{t('common.date')}</dt><dd className="num">{fmtDateYear(a.received_at, tz, t.locale)}, {fmtTime(a.received_at, tz)}</dd></div>
+        <div><dt>{t('rcpt.receivedFrom')}</dt><dd>{customer.name}<span className="muted num"> · {formatPhone(customer.phone)}</span></dd></div>
+        {event && <div><dt>{t('rcpt.for')}</dt><dd>{event.title} · {dayTextT(t, localDate(new Date(event.event_at), tz))}</dd></div>}
+        <div><dt>{t('bill.paidBy')}</dt><dd>{t(`method.${a.method}`)}{a.reference ? <span className="muted"> · {a.reference}</span> : null}</dd></div>
+        {a.refund_amount ? <div><dt>{t('rcpt.handedBack')}</dt><dd className="num danger-text">{t('rcpt.moneyOn', { money: money(a.refund_amount), date: fmtDateYear(a.refunded_at!, tz, t.locale) })}</dd></div> : null}
+        <div className="coin-receipt-total"><dt>{t('rcpt.advReceived')}</dt><dd className="num">{money(a.amount)}</dd></div>
       </dl>
       <p className="tiny muted">
-        Not a tax invoice. This advance will be adjusted on your final bill{salon.gstMode === 'regular' ? ', and GST is charged on that bill' : ''}.
+        {salon.gstMode === 'regular' ? t('rcpt.advNoteGst') : t('rcpt.advNote')}
         {salon.policy ? ` ${salon.policy}` : ''}
       </p>
     </div>

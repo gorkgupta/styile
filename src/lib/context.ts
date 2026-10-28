@@ -6,12 +6,15 @@ import { createClient } from './supabase/server';
 import { can, type Permission } from './permissions';
 import type { Branch, MemberRole, Salon } from './types';
 import { mainUrl, PATH_HEADER, rootDomain, SALON_HEADER, salonUrl } from './tenant';
+import { toLocale, type Locale } from './i18n/locales';
 
 export const ACTIVE_SALON_COOKIE = 'styile_salon';
 
 export interface SalonContext {
   supabase: Awaited<ReturnType<typeof createClient>>;
   user: { id: string; email: string | null; name: string };
+  /** The language this user sees the app in (profiles.locale, English when unset). */
+  locale: Locale;
   salon: Salon;
   branch: Branch;
   role: MemberRole;
@@ -34,7 +37,7 @@ export const getSalonContext = cache(async (): Promise<SalonContext> => {
 
   const [{ data: memberships }, { data: profile }] = await Promise.all([
     supabase.from('salon_members').select('salon_id, role, staff_id, salons(name, slug)').eq('user_id', user.id),
-    supabase.from('profiles').select('full_name, is_platform_admin').eq('id', user.id).maybeSingle(),
+    supabase.from('profiles').select('full_name, is_platform_admin, locale').eq('id', user.id).maybeSingle(),
   ]);
 
   if (!memberships?.length) {
@@ -65,6 +68,7 @@ export const getSalonContext = cache(async (): Promise<SalonContext> => {
   return {
     supabase,
     user: { id: user.id, email: user.email ?? null, name: profile?.full_name || user.email || 'You' },
+    locale: toLocale(profile?.locale),
     salon: salon as Salon,
     branch: branch as Branch,
     role: active.role as MemberRole,

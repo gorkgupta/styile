@@ -7,11 +7,13 @@ import { Icon } from '@/components/ui/icons';
 import { Topbar } from './shell';
 import { saveCustomer } from '@/actions/customers';
 import { money } from '@/lib/billing';
-import { coinsText, fmtCoins } from '@/lib/coins';
+import { fmtCoins } from '@/lib/coins';
 import { formatPhone } from '@/lib/phone';
 import { PhoneInput } from '@/components/ui/phone-input';
-import { daysBetween, relativeAgo } from '@/lib/periods';
-import { localDate } from '@/lib/time';
+import { daysBetween } from '@/lib/periods';
+import { fmtDayMonthYear, localDate } from '@/lib/time';
+import { useT } from '@/lib/i18n/react';
+import { coinsT, relativeAgoT } from '@/lib/i18n/format';
 import type { Customer } from '@/lib/types';
 
 export type ClientRow = Pick<Customer, 'id' | 'name' | 'phone' | 'email' | 'gender' | 'birthday' | 'tags' | 'visit_count' | 'total_spent' | 'last_visit_at' | 'created_at'>
@@ -20,21 +22,22 @@ export type ClientRow = Pick<Customer, 'id' | 'name' | 'phone' | 'email' | 'gend
 type Filter = 'all' | 'vip' | 'new' | 'lapsed' | 'birthday';
 type Sort = 'recent' | 'name' | 'spent' | 'visits';
 
-const FILTERS: { value: Filter; label: string }[] = [
-  { value: 'all', label: 'All' },
-  { value: 'vip', label: 'VIP' },
-  { value: 'new', label: 'New this month' },
-  { value: 'lapsed', label: 'Not seen in 60+ days' },
-  { value: 'birthday', label: 'Birthdays this month' },
+const FILTERS: { value: Filter; label: 'inv.all' | 'cl.vip' | 'cl.newMonth' | 'cl.lapsed' | 'cl.birthdays' }[] = [
+  { value: 'all', label: 'inv.all' },
+  { value: 'vip', label: 'cl.vip' },
+  { value: 'new', label: 'cl.newMonth' },
+  { value: 'lapsed', label: 'cl.lapsed' },
+  { value: 'birthday', label: 'cl.birthdays' },
 ];
 
 export const isVip = (tags: string[]) => tags.some((t) => t.toLowerCase() === 'vip');
 
 /** A client's coin balance, shown only when they have some. */
 export function CoinChip({ balance }: { balance?: number | null }) {
+  const t = useT();
   const n = Number(balance ?? 0);
   if (n <= 0) return null;
-  return <span className="coin-chip num" title={`${coinsText(n)} to spend here`}><Icon name="coins" size={12} />{fmtCoins(n)}<span className="sr-only"> coins</span></span>;
+  return <span className="coin-chip num" title={t('cl.toSpend', { coins: coinsT(t, n) })}><Icon name="coins" size={12} />{fmtCoins(n)}<span className="sr-only"> {t('method.wallet')}</span></span>;
 }
 
 /** Client tags as badges; VIP stands out in marigold. */
@@ -53,6 +56,7 @@ export interface CustomersProps {
 
 export function CustomersScreen({ clients, today, tz, truncated, initialQuery }: CustomersProps) {
   const router = useRouter();
+  const t = useT();
   const [q, setQ] = useState(initialQuery ?? '');
   const [filter, setFilter] = useState<Filter>('all');
   const [sort, setSort] = useState<Sort>('recent');
@@ -62,10 +66,10 @@ export function CustomersScreen({ clients, today, tz, truncated, initialQuery }:
   // With a very large client list, search on the server once typing pauses.
   useEffect(() => {
     if (!truncated) return;
-    const t = setTimeout(() => {
+    const timer = setTimeout(() => {
       if ((initialQuery ?? '') !== q.trim()) router.replace(q.trim() ? `/app/customers?q=${encodeURIComponent(q.trim())}` : '/app/customers');
     }, 400);
-    return () => clearTimeout(t);
+    return () => clearTimeout(timer);
   }, [q, truncated, initialQuery, router]);
 
   const tests: Record<Filter, (c: ClientRow) => boolean> = useMemo(() => ({
@@ -99,30 +103,30 @@ export function CustomersScreen({ clients, today, tz, truncated, initialQuery }:
     return list.sort(by[sort]);
   }, [clients, tests, filter, q, sort]);
 
-  const bday = (b: string) => new Intl.DateTimeFormat('en-IN', { timeZone: 'UTC', day: 'numeric', month: 'short' }).format(new Date(`${b}T00:00:00Z`));
+  const bday = (b: string) => fmtDayMonthYear(Number(b.slice(0, 4)), Number(b.slice(5, 7)), Number(b.slice(8, 10)), t.locale, { year: false });
 
   return (
     <>
-      <Topbar title="Clients" subtitle={`${clients.length.toLocaleString('en-IN')}${truncated ? '+' : ''} client${clients.length === 1 ? '' : 's'}`}
-        actions={<Button variant="primary" icon="plus" onClick={() => setAdding(true)}><span className="hide-mobile">Add client</span></Button>} />
+      <Topbar title={t('nav.clients')} subtitle={t('cl.count', { count: clients.length, n: `${clients.length.toLocaleString('en-IN')}${truncated ? '+' : ''}` })}
+        actions={<Button variant="primary" icon="plus" onClick={() => setAdding(true)} aria-label={t('cl.add')}><span className="hide-mobile">{t('cl.add')}</span></Button>} />
       <div className="page">
         <Panel flush title={
           <div className="filters grow client-filters">
-            <div className="filters-search filters-search-left"><SearchInput value={q} onChange={setQ} placeholder="Name or phone" /></div>
+            <div className="filters-search filters-search-left"><SearchInput value={q} onChange={setQ} placeholder={t('cl.namePhone')} /></div>
             <div className="filters-scroll">
-              <div className="row" role="group" aria-label="Quick filters">
+              <div className="row" role="group" aria-label={t('cl.quickFilters')}>
                 {FILTERS.map((f) => (
                   <button key={f.value} type="button" className="chip chip-sm nowrap" aria-pressed={filter === f.value} onClick={() => setFilter(f.value)}>
-                    {f.value === 'birthday' && <Icon name="gift" size={14} />}{f.label}<span className="chip-count num">{counts[f.value]}</span>
+                    {f.value === 'birthday' && <Icon name="gift" size={14} />}{t(f.label)}<span className="chip-count num">{counts[f.value]}</span>
                   </button>
                 ))}
               </div>
             </div>
-            <select className="select input-sm sort-select" value={sort} onChange={(e) => setSort(e.target.value as Sort)} aria-label="Sort clients" disabled={filter === 'birthday'}>
-              <option value="recent">Last visit</option>
-              <option value="name">Name A–Z</option>
-              <option value="spent">Total spent</option>
-              <option value="visits">Most visits</option>
+            <select className="select input-sm sort-select" value={sort} onChange={(e) => setSort(e.target.value as Sort)} aria-label={t('cl.sort')} disabled={filter === 'birthday'}>
+              <option value="recent">{t('cl.lastVisit')}</option>
+              <option value="name">{t('cl.nameAz')}</option>
+              <option value="spent">{t('cl.totalSpent')}</option>
+              <option value="visits">{t('cl.mostVisits')}</option>
             </select>
           </div>
         }>
@@ -131,7 +135,7 @@ export function CustomersScreen({ clients, today, tz, truncated, initialQuery }:
               <div className="table-wrap hide-mobile">
                 <table className="table">
                   <thead>
-                    <tr><th>Name</th><th>Phone</th><th className="right">Visits</th><th className="right">Total spent</th><th>{filter === 'birthday' ? 'Birthday' : 'Last visit'}</th></tr>
+                    <tr><th>{t('common.name')}</th><th>{t('cl.phone')}</th><th className="right">{t('cl.visits')}</th><th className="right">{t('cl.totalSpent')}</th><th>{filter === 'birthday' ? t('cl.birthday') : t('cl.lastVisit')}</th></tr>
                   </thead>
                   <tbody>
                     {shown.map((c) => (
@@ -147,7 +151,7 @@ export function CustomersScreen({ clients, today, tz, truncated, initialQuery }:
                         <td className="num ink2 nowrap">{formatPhone(c.phone)}</td>
                         <td className="right num">{c.visit_count}</td>
                         <td className="right num strong">{money(Math.round(Number(c.total_spent)))}</td>
-                        <td className="ink2 nowrap">{filter === 'birthday' && c.birthday ? <span className="row"><Icon name="gift" size={15} />{bday(c.birthday)}</span> : relativeAgo(c.last_visit_at, today, tz)}</td>
+                        <td className="ink2 nowrap">{filter === 'birthday' && c.birthday ? <span className="row"><Icon name="gift" size={15} />{bday(c.birthday)}</span> : relativeAgoT(t, c.last_visit_at, today, tz)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -160,11 +164,11 @@ export function CustomersScreen({ clients, today, tz, truncated, initialQuery }:
                       <Avatar name={c.name} color={isVip(c.tags) ? 'var(--marigold-700)' : undefined} />
                       <div className="grow">
                         <div className="row"><span className="strong truncate">{c.name}</span><TagBadges tags={c.tags.slice(0, 1)} /><CoinChip balance={c.coin_balance} /></div>
-                        <div className="tiny muted num truncate">{formatPhone(c.phone)} · {filter === 'birthday' && c.birthday ? `Birthday ${bday(c.birthday)}` : relativeAgo(c.last_visit_at, today, tz)}</div>
+                        <div className="tiny muted num truncate">{formatPhone(c.phone)} · {filter === 'birthday' && c.birthday ? t('cl.birthdayOn', { date: bday(c.birthday) }) : relativeAgoT(t, c.last_visit_at, today, tz)}</div>
                       </div>
                       <div className="right">
                         <div className="num strong small">{money(Math.round(Number(c.total_spent)))}</div>
-                        <div className="tiny muted num">{c.visit_count} visit{c.visit_count === 1 ? '' : 's'}</div>
+                        <div className="tiny muted num">{t('common.visits', { count: c.visit_count })}</div>
                       </div>
                     </Link>
                   </li>
@@ -172,12 +176,12 @@ export function CustomersScreen({ clients, today, tz, truncated, initialQuery }:
               </ul>
             </>
           ) : clients.length ? (
-            <Empty icon="search" title="No clients match" action={<div className="row"><Button size="sm" onClick={() => { setQ(''); setFilter('all'); }}>Clear filters</Button><Button size="sm" icon="plus" onClick={() => setAdding(true)}>Add client</Button></div>}>
-              {q ? `Nobody called “${q}” yet.` : 'No one fits this filter right now.'}
+            <Empty icon="search" title={t('cl.noMatch')} action={<div className="row"><Button size="sm" onClick={() => { setQ(''); setFilter('all'); }}>{t('inv.clearFilters')}</Button><Button size="sm" icon="plus" onClick={() => setAdding(true)}>{t('cl.add')}</Button></div>}>
+              {q ? t('cl.nobodyCalled', { q }) : t('cl.noFit')}
             </Empty>
           ) : (
-            <Empty icon="users" title="Add your first client" action={<Button variant="primary" icon="plus" onClick={() => setAdding(true)}>Add client</Button>}>
-              Clients are also added automatically when they book on WhatsApp or your booking page.
+            <Empty icon="users" title={t('cl.first')} action={<Button variant="primary" icon="plus" onClick={() => setAdding(true)}>{t('cl.add')}</Button>}>
+              {t('cl.firstBody')}
             </Empty>
           )}
         </Panel>
@@ -195,6 +199,7 @@ const SUGGESTED_TAGS = ['VIP', 'Bridal', 'Regular', 'Sensitive skin'];
 export function ClientFormSheet({ open, onClose, initial, onSaved }: { open: boolean; onClose: () => void; initial?: ClientFormValue | null; onSaved?: (id: string) => void }) {
   const toast = useToast();
   const router = useRouter();
+  const t = useT();
   const [pending, start] = useTransition();
   const [v, setV] = useState<ClientFormValue>(blank());
   const [tagDraft, setTagDraft] = useState('');
@@ -208,50 +213,50 @@ export function ClientFormSheet({ open, onClose, initial, onSaved }: { open: boo
   }, [open, initial]);
 
   const set = <K extends keyof ClientFormValue>(k: K, val: ClientFormValue[K]) => setV((x) => ({ ...x, [k]: val }));
-  const addTag = (t: string) => { const tag = t.trim(); if (tag && !v.tags.some((x) => x.toLowerCase() === tag.toLowerCase())) set('tags', [...v.tags, tag]); setTagDraft(''); };
+  const addTag = (raw: string) => { const tag = raw.trim(); if (tag && !v.tags.some((x) => x.toLowerCase() === tag.toLowerCase())) set('tags', [...v.tags, tag]); setTagDraft(''); };
 
   const submit = () => start(async () => {
     setError(null);
     const tags = tagDraft.trim() ? [...v.tags, tagDraft.trim()] : v.tags;
     const r = await saveCustomer({ ...v, tags, id: initial?.id ?? null });
-    if (!r.ok) return setError(r.error);
-    toast(r.message ?? 'Client saved');
+    if (!r.ok) return setError(t.err(r.error));
+    toast(initial?.id ? t('err.clientSaved') : t('err.clientAdded'));
     onClose();
     if (onSaved && r.data) onSaved(r.data.id); else router.refresh();
   });
 
   return (
-    <Sheet open={open} onClose={onClose} title={initial?.id ? 'Edit client' : 'Add client'} width={500}
-      footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" loading={pending} onClick={submit}>{initial?.id ? 'Save client' : 'Add client'}</Button></>}>
+    <Sheet open={open} onClose={onClose} title={initial?.id ? t('cl.edit') : t('cl.add')} width={500}
+      footer={<><Button variant="ghost" onClick={onClose}>{t('common.cancel')}</Button><Button variant="primary" loading={pending} onClick={submit}>{initial?.id ? t('cl.save') : t('cl.add')}</Button></>}>
       <form className="stack-lg" onSubmit={(e) => { e.preventDefault(); submit(); }}>
         <div className="grid-2">
-          <TextField label="Name" value={v.name} onChange={(e) => set('name', e.target.value)} autoFocus={!initial?.id} autoComplete="off" />
-          <PhoneInput id="cl-phone" label="Mobile number" value={v.phone} onChange={(p) => set('phone', p)} />
+          <TextField label={t('common.name')} value={v.name} onChange={(e) => set('name', e.target.value)} autoFocus={!initial?.id} autoComplete="off" />
+          <PhoneInput id="cl-phone" label={t('common.mobileNumber')} value={v.phone} onChange={(p) => set('phone', p)} />
         </div>
         <div className="grid-2">
-          <SelectField label="Gender" value={v.gender ?? ''} onChange={(e) => set('gender', (e.target.value || null) as ClientFormValue['gender'])}>
-            <option value="">Not set</option><option value="female">Female</option><option value="male">Male</option><option value="other">Other</option>
+          <SelectField label={t('cl.gender')} value={v.gender ?? ''} onChange={(e) => set('gender', (e.target.value || null) as ClientFormValue['gender'])}>
+            <option value="">{t('cl.notSet')}</option><option value="female">{t('cl.female')}</option><option value="male">{t('cl.male')}</option><option value="other">{t('common.other')}</option>
           </SelectField>
-          <TextField label="Birthday" type="date" value={v.birthday ?? ''} onChange={(e) => set('birthday', e.target.value || null)} hint="For birthday offers" />
+          <TextField label={t('cl.birthday')} type="date" value={v.birthday ?? ''} onChange={(e) => set('birthday', e.target.value || null)} hint={t('cl.birthdayHint')} />
         </div>
-        <TextField label="Email" type="email" placeholder="Optional" value={v.email ?? ''} onChange={(e) => set('email', e.target.value)} />
+        <TextField label={t('cl.email')} type="email" placeholder={t('cl.optional')} value={v.email ?? ''} onChange={(e) => set('email', e.target.value)} />
         <div className="field">
-          <label htmlFor="cl-tag">Tags</label>
+          <label htmlFor="cl-tag">{t('cl.tags')}</label>
           <div className="row-wrap">
-            {v.tags.map((t) => (
-              <button key={t} type="button" className="chip chip-sm is-on" onClick={() => set('tags', v.tags.filter((x) => x !== t))} aria-label={`Remove tag ${t}`}>
-                {t}<Icon name="x" size={13} />
+            {v.tags.map((tag) => (
+              <button key={tag} type="button" className="chip chip-sm is-on" onClick={() => set('tags', v.tags.filter((x) => x !== tag))} aria-label={t('cl.removeTag', { tag })}>
+                {tag}<Icon name="x" size={13} />
               </button>
             ))}
-            {SUGGESTED_TAGS.filter((t) => !v.tags.some((x) => x.toLowerCase() === t.toLowerCase())).map((t) => (
-              <button key={t} type="button" className="chip chip-sm" onClick={() => addTag(t)}><Icon name="plus" size={13} />{t}</button>
+            {SUGGESTED_TAGS.filter((tag) => !v.tags.some((x) => x.toLowerCase() === tag.toLowerCase())).map((tag) => (
+              <button key={tag} type="button" className="chip chip-sm" onClick={() => addTag(tag)}><Icon name="plus" size={13} />{tag}</button>
             ))}
           </div>
-          <input id="cl-tag" className="input input-sm" placeholder="Type a tag and press Enter" value={tagDraft} onChange={(e) => setTagDraft(e.target.value)}
+          <input id="cl-tag" className="input input-sm" placeholder={t('cl.tagPh')} value={tagDraft} onChange={(e) => setTagDraft(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addTag(tagDraft); } }} />
         </div>
-        <TextArea label="Notes" rows={3} placeholder="Colour formula, allergies, preferred stylist" value={v.notes ?? ''} onChange={(e) => set('notes', e.target.value)} />
-        <Switch checked={v.marketing_opt_in} onChange={(x) => set('marketing_opt_in', x)} label={<span className="small">Send offers and birthday wishes on WhatsApp</span>} />
+        <TextArea label={t('common.notes')} rows={3} placeholder={t('cl.notesPh')} value={v.notes ?? ''} onChange={(e) => set('notes', e.target.value)} />
+        <Switch checked={v.marketing_opt_in} onChange={(x) => set('marketing_opt_in', x)} label={<span className="small">{t('cl.optIn')}</span>} />
         {error && <Notice tone="error">{error}</Notice>}
         <button type="submit" hidden />
       </form>

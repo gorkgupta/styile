@@ -6,6 +6,7 @@ import { money } from '@/lib/billing';
 import { qrSvgPath } from '@/lib/qr';
 import { upiPayUrl } from '@/lib/upi';
 import { cx } from './ui';
+import { useT } from '@/lib/i18n/react';
 
 export interface UpiQrProps {
   vpa: string;
@@ -22,22 +23,23 @@ export interface UpiQrProps {
 }
 
 export function UpiQr({ vpa, name, amount, note, size = 168, caption = 'full', appLink, className }: UpiQrProps) {
+  const t = useT();
   const url = useMemo(() => upiPayUrl({ vpa, name, amount, note }), [vpa, name, amount, note]);
   const qr = useMemo(() => qrSvgPath(url, 2), [url]);
   return (
     <figure className={cx('upi-qr', className)}>
       <svg viewBox={`0 0 ${qr.size} ${qr.size}`} width={size} height={size} role="img" shapeRendering="crispEdges"
-        aria-label={`UPI QR code: pay ${money(amount)} to ${name}`}>
+        aria-label={t('upi.aria', { money: money(amount), name })}>
         <rect className="upi-qr-bg" width={qr.size} height={qr.size} />
         <path className="upi-qr-fg" d={qr.path} />
       </svg>
       {caption !== 'none' && (
         <figcaption>
-          <span className="strong num">Scan to pay {money(amount)}</span>
-          {caption === 'full' && <span className="tiny muted">Any UPI app · to {name} · <span className="mono">{vpa}</span></span>}
+          <span className="strong num">{t('upi.scan', { money: money(amount) })}</span>
+          {caption === 'full' && <span className="tiny muted">{t('upi.anyApp', { name })} · <span className="mono">{vpa}</span></span>}
         </figcaption>
       )}
-      {appLink && <a className="btn btn-secondary btn-sm upi-qr-app show-mobile" href={url}>Pay {money(amount)} in a UPI app</a>}
+      {appLink && <a className="btn btn-secondary btn-sm upi-qr-app show-mobile" href={url}>{t('upi.payInApp', { money: money(amount) })}</a>}
     </figure>
   );
 }

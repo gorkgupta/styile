@@ -137,19 +137,23 @@ export function toE164(digits: string): string {
 }
 
 /** What to tell someone whose number didn't normalise, in terms of the country they typed. */
-export function invalidPhoneMessage(input: string, defaultCountry = '91'): string {
-  const generic = `Enter a valid mobile number with its country code, like ${OTHER_EXAMPLE}.`;
+/** The country a mistyped number seems to be from (for the error message), or null when it can't be told. */
+export function invalidPhoneCountry(input: string, defaultCountry = '91'): PhoneCountry | null {
   const raw = (input || '').trim();
   const d = digitsOf(raw);
   let country = phoneCountry(defaultCountry);
   if (raw.startsWith('+') || d.startsWith('00')) {
     country = phoneCountry(callingCodeOf(raw.startsWith('+') ? d : d.slice(2)));
-    if (!country) return generic;
   } else if (country && d.length > country.nationalLength + 1) {
     const typed = phoneCountry(callingCodeOf(d));
     if (typed) country = typed;
   }
-  if (!country) return generic;
+  return country;
+}
+
+export function invalidPhoneMessage(input: string, defaultCountry = '91'): string {
+  const country = invalidPhoneCountry(input, defaultCountry);
+  if (!country) return `Enter a valid mobile number with its country code, like ${OTHER_EXAMPLE}.`;
   return `Enter a valid ${country.adjective} mobile number (${country.nationalLength} digits).`;
 }
 

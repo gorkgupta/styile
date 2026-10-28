@@ -7,7 +7,8 @@ Styile is a multi-tenant salon management SaaS for India: Next.js 15 (App Router
 ```
 supabase/migrations/   schema (0001), row level security (0002), RPC functions (0003), salon addresses (0004), coins (0005), stylist profiles (0006), GST modes (0007), payment types (0008), day close (0009), receipts & UPI (0010),
                        packages & memberships (0011 adds the 'package' payment type, 0012 the rest),
-                       bridal & event bookings with advances (0013 adds the 'advance' payment type, 0014 the rest)
+                       bridal & event bookings with advances (0013 adds the 'advance' payment type, 0014 the rest),
+                       languages (0015: profiles.locale, salons.default_locale)
 src/app/               routes. /app/* = salon dashboard, /s/[slug] = salon site (booking page; /s/[slug]/me = client portal), /admin = platform console.
                        In production the middleware serves /s/<slug>/* at <slug>.styile.com/* (see src/lib/tenant.ts); link with
                        salonUrl(slug, path) from '@/lib/tenant', or with the `base` prop inside salon-site pages — never hardcode /s/ or /me.
@@ -16,6 +17,7 @@ src/components/ui/     primitives: ui.tsx (Button, TextField, SelectField, TextA
                        Panel, Stat, Empty, Notice, Segmented, Sheet, Dialog, ToastProvider/useToast, SubmitButton), icons.tsx (<Icon name=…/>)
 src/components/app/    dashboard screens. shell.tsx has AppShell + <Topbar title subtitle actions back/>
 src/lib/               types.ts (row types + labels), time.ts (time zones/formatting), billing.ts (computeBill, money, amountInWords), packages.ts (packages & membership cards), events.ts (bridal & event bookings, advances), gst.ts (GST modes, bill types, rates, states), upi.ts (UPI QR payload), qr.ts (vendored QR encoder, MIT),
+                       i18n/ (languages: en.ts strings, hi/ne/bn translations, useT/getT — see docs/TRANSLATIONS.md),
                        availability.ts (slot engine), booking.ts (server booking service), coins.ts (coin packs/formatting), phone.ts, permissions.ts (can(role, perm)),
                        context.ts (getSalonContext/requirePermission), queries.ts, actions.ts (fail/must/errorMessage),
                        supabase/{server,client,admin}.ts, whatsapp/{cloud-api,outbox}.ts, env.ts
@@ -58,6 +60,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ q
 * Styling: classes from `src/app/globals.css` only (no CSS framework, no inline colours except staff colours). Useful classes: `page`, `split`, `stack/stack-sm/stack-lg`, `row/row-wrap/between/grow`, `grid-2/grid-3`, `panel/panel-head/panel-body`, `list`, `table/table-wrap`, `stats/stat`, `chip` (aria-pressed), `segmented`, `badge-*`, `muted/small/tiny/strong/num/truncate/nowrap`, `hide-mobile/show-mobile`, `notice-*`.
 * Colours: peacock teal (primary action), marigold (attention/now/queue), aubergine ink text. Money and times use `className="num"` (tabular figures). Money: `money(n)` (₹1,24,500). Dates/times: helpers in `lib/time.ts` with the salon `tz` — never `toLocaleString()` without a timeZone.
 * Copy: plain, sentence case, Indian English, the user's words ("Clients", "Bills", "Stylist", "Walk-in"). Buttons say what happens ("Save client", "Record payment"). Errors say how to fix. Empty states invite the next action.
+* Languages: on translated screens (client pages and front desk; see docs/TRANSLATIONS.md) text goes through `const t = useT(); t('area.key', vars)` with the English in `src/lib/i18n/en.ts` — no new hard-coded strings there. Dates with words take the language: `fmtDateLong(d, t.locale)`. Keep digits Latin. Server components/actions use `getT(locale)`.
 * Mobile first-class: everything must work at 390px wide (front desks use phones/tablets). Tables get a `table-wrap` or turn into lists on mobile.
 * Accessibility: real `<button>`/`<a>`, labels on inputs (TextField/SelectField do this), `aria-pressed` on toggles, visible focus is global.
 * No new npm dependencies.

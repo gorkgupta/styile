@@ -10,6 +10,8 @@ import { BookingFlow } from '@/components/public/booking-flow';
 import { salonSiteBase } from '@/lib/site';
 import { isReservedSlug } from '@/lib/tenant';
 import { parseBookingLink, shownOnline, toPublicStylist } from '@/lib/stylists';
+import { I18nRoot } from '@/lib/i18n/root';
+import { getT, siteLocale } from '@/lib/i18n/server';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,24 +21,25 @@ const SLUG_RE = /^[a-z0-9]([a-z0-9-]{1,38}[a-z0-9])$/;
 const findSalon = cache(async (slug: string) => {
   if (!SLUG_RE.test(slug) || isReservedSlug(slug)) return null;
   const { data } = await createAdminClient().from('salons')
-    .select('id, name, city').eq('slug', slug).eq('booking_enabled', true)
+    .select('id, name, city, default_locale').eq('slug', slug).eq('booking_enabled', true)
     .not('plan_status', 'in', '(suspended,cancelled)').maybeSingle();
-  return (data as { id: string; name: string; city: string | null } | null) ?? null;
+  return (data as { id: string; name: string; city: string | null; default_locale: string | null } | null) ?? null;
 });
 
-export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+export async function generateMetadata({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<{ lang?: string | string[] }> }): Promise<Metadata> {
   const salon = await findSalon((await params).slug);
   if (!salon) return { title: 'Booking page not found' };
+  const t = getT(await siteLocale(salon.default_locale, (await searchParams).lang));
   return {
-    title: { absolute: `Book at ${salon.name}` },
-    description: `Book an appointment at ${salon.name}${salon.city ? `, ${salon.city}` : ''}. Pick a service, stylist and time.`,
+    title: { absolute: t('meta.bookAt', { salon: salon.name }) },
+    description: t('meta.bookDesc', { salon: salon.name + (salon.city ? `, ${salon.city}` : '') }),
   };
 }
 
 export default async function Page({ params, searchParams }: {
   params: Promise<{ slug: string }>;
   /** ?stylist=<staff id>&services=<id,id> pre-selects a stylist and services ("Book again with Priya"). */
-  searchParams: Promise<{ stylist?: string | string[]; services?: string | string[] }>;
+  searchParams: Promise<{ stylist?: string | string[]; services?: string | string[]; lang?: string | string[] }>;
 }) {
   const { slug } = await params;
   const query = await searchParams;
@@ -76,8 +79,10 @@ export default async function Page({ params, searchParams }: {
     usualStylistId = typeof usual === 'string' && staff.some((s) => s.id === usual) ? usual : null;
   }
   const link = parseBookingLink(query, { serviceIds: services.map((s) => s.id), staffIds: staff.map((s) => s.id), skills });
+  const locale = await siteLocale(found.default_locale, query.lang);
 
   return (
+    <I18nRoot locale={locale}>
     <BookingFlow
       salon={{
         name: salon.name, slug: salon.slug, address: branch.address ?? salon.address, city: salon.city, phone: branch.phone ?? salon.phone,
@@ -96,5 +101,6 @@ export default async function Page({ params, searchParams }: {
       me={me}
       base={await salonSiteBase(slug)}
     />
+    </I18nRoot>
   );
 }

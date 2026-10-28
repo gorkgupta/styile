@@ -1,6 +1,7 @@
 // Row types mirroring supabase/migrations. Keep in sync when the schema changes
 // (or regenerate with `npx supabase gen types typescript`).
 import type { BillType, GstMode } from './gst';
+import type { Locale } from './i18n/locales';
 export type { BillType, GstMode } from './gst';
 
 export type MemberRole = 'owner' | 'manager' | 'receptionist' | 'stylist';
@@ -40,6 +41,8 @@ export interface Salon {
   receipt_size: ReceiptSize;
   /** Printed on advance receipts (0014), e.g. "Refundable up to 7 days before the event". Nothing is forfeited automatically. */
   advance_policy?: string | null;
+  /** Language of the salon's client pages (0015): booking page, /me, bills and receipts. */
+  default_locale?: Locale;
   created_at: string;
 }
 

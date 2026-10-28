@@ -12,10 +12,16 @@ import { closeDay, reopenDay } from '@/actions/dayclose';
 import { money } from '@/lib/billing';
 import { fmtCoins } from '@/lib/coins';
 import {
-  cashDifference, fmtNu, isCoins, isPrepaid, methodLabel, methodRows, PAID_FROM_LABEL, showsNu, sortMethods,
+  cashDifference, fmtNu, isCoins, isPrepaid, methodLabel, methodRows, showsNu, sortMethods,
   type CashCheck, type DayClose, type DaySummary,
 } from '@/lib/dayclose';
-import { addDays, fmtDateLong, fmtDateShort, fmtTime, localDate } from '@/lib/time';
+import { addDays, dateParts, fmtDateLong, fmtDateShort, fmtTime, localDate } from '@/lib/time';
+import { rich, useT } from '@/lib/i18n/react';
+import type { Translator } from '@/lib/i18n/core';
+import { METHOD_LABEL } from '@/lib/types';
+
+/** A payment method's name in the page's language (unknown future methods fall back to lib/dayclose). */
+const mLabel = (t: Translator, m: string) => (m in METHOD_LABEL ? t(`method.${m as keyof typeof METHOD_LABEL}`) : methodLabel(m));
 
 export interface DayCloseProps {
   salonName: string;
@@ -43,10 +49,11 @@ const METHOD_ICON: Record<string, IconName> = { cash: 'cash', cash_nu: 'cash', u
 const pctOf = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 100) : 0);
 
 export function DayCloseScreen(p: DayCloseProps) {
+  const t = useT();
   const router = useRouter();
   const toast = useToast();
   const s = p.summary;
-  const t = s.totals;
+  const tt = s.totals;
   const closed = p.close;
   const nu = showsNu(s) || (closed?.counted_cash_nu ?? null) !== null;
   const [sheet, setSheet] = useState<{ open: boolean; expense: ExpenseRow | null }>({ open: false, expense: null });
@@ -57,53 +64,55 @@ export function DayCloseScreen(p: DayCloseProps) {
   const reopen = () => start(async () => {
     const r = await reopenDay(p.date);
     setReopenOpen(false);
-    if (!r.ok) return toast(r.error, 'error');
-    toast(r.message ?? 'Reopened');
+    if (!r.ok) return toast(t.err(r.error), 'error');
+    toast(t('dc.reopened', { date: fmtDateShort(p.date, t.locale) }));
     router.refresh();
   });
 
+  const closedAt = closed ? fmtTime(closed.closed_at, p.tz) + (localDate(new Date(closed.closed_at), p.tz) !== p.date ? `, ${fmtDateShort(localDate(new Date(closed.closed_at), p.tz), t.locale)}` : '') : '';
+  const closedLine = closed ? (closed.details.closed_by_name ? t('dc.closedByAt', { name: closed.details.closed_by_name, time: closedAt }) : t('dc.closedAt', { time: closedAt })) : '';
   const subtitle = closed
-    ? `${fmtDateLong(p.date)} · closed${closed.details.closed_by_name ? ` by ${closed.details.closed_by_name}` : ''} at ${fmtTime(closed.closed_at, p.tz)}${localDate(new Date(closed.closed_at), p.tz) !== p.date ? `, ${fmtDateShort(localDate(new Date(closed.closed_at), p.tz))}` : ''}`
-    : `${fmtDateLong(p.date)} · ${p.date === p.today ? 'open' : 'not closed yet'}`;
+    ? `${fmtDateLong(p.date, t.locale)} · ${closedLine}`
+    : `${fmtDateLong(p.date, t.locale)} · ${p.date === p.today ? t('dc.open') : t('dc.notClosedYet')}`;
   const changed = closed && p.liveExpected != null && Math.abs(p.liveExpected - closed.expected_cash) >= 0.005;
 
   return (
     <>
-      <Topbar title="Day close" subtitle={subtitle}
+      <Topbar title={t('nav.close')} subtitle={subtitle}
         actions={<>
-          <Button icon="printer" onClick={() => window.print()} className="no-print"><span className="hide-mobile">Print</span></Button>
-          {closed && p.canReopen && <Button icon="unlock" onClick={() => setReopenOpen(true)} className="no-print"><span className="hide-mobile">Reopen</span></Button>}
+          <Button icon="printer" onClick={() => window.print()} className="no-print" aria-label={t('common.print')}><span className="hide-mobile">{t('common.print')}</span></Button>
+          {closed && p.canReopen && <Button icon="unlock" onClick={() => setReopenOpen(true)} className="no-print" aria-label={t('dc.reopen')}><span className="hide-mobile">{t('dc.reopen')}</span></Button>}
         </>} />
       <div className="page dc-page">
         <div className="dc-print-head">
-          <div className="strong">{p.salonName} — day close</div>
-          <div>{fmtDateLong(p.date)}{closed ? ` · closed${closed.details.closed_by_name ? ` by ${closed.details.closed_by_name}` : ''} at ${fmtTime(closed.closed_at, p.tz)}` : ' · not closed'}</div>
+          <div className="strong">{t('dc.printTitle', { salon: p.salonName })}</div>
+          <div>{fmtDateLong(p.date, t.locale)} · {closed ? closedLine : t('dc.notClosed')}</div>
         </div>
 
         <DateBar date={p.date} today={p.today} recent={p.recent} onGo={go} />
 
         {changed && (
           <Notice tone="warn">
-            Bills, payments or expenses for this day changed after it was closed. Cash expected is now <strong className="num">{money(p.liveExpected!)}</strong> (was {money(closed!.expected_cash)}).
-            {p.canReopen ? ' Reopen the day and close it again to update the record.' : ' Ask the owner or a manager to reopen it.'}
+            {rich(t('dc.changed', { was: money(closed!.expected_cash) }), { now: <strong className="num">{money(p.liveExpected!)}</strong> })}
+            {' '}{p.canReopen ? t('dc.changedReopen') : t('dc.changedAsk')}
           </Notice>
         )}
 
         <div className="stats">
-          <Stat label="Sales" value={money(t.sales)}
-            sub={<>{t.bills} bill{t.bills === 1 ? '' : 's'}{t.due > 0.5 ? <> · <span className="warn-text strong">{money(t.due)} due</span></> : ''}</>} />
-          <Stat label="Collected" value={money(t.collected)}
-            sub={t.refunds > 0 ? <span className="danger-text">after {money(t.refunds)} handed back</span>
-              : t.coins_sold || t.packages_sold || t.advances_received ? `incl. ${[t.coins_sold ? `${money(t.coins_sold)} coins` : '', t.packages_sold ? `${money(t.packages_sold)} packages` : '', t.advances_received ? `${money(t.advances_received)} advances` : ''].filter(Boolean).join(', ')}`
-              : 'Cash, UPI and card'} />
-          <Stat label="Cash expected in drawer" value={money(t.expected_cash)}
-            sub={nu ? <span className="num">+ {fmtNu(t.expected_cash_nu)}</span> : `Opening ${money(t.opening_cash)}`} />
-          <Stat label="Expenses" value={money(t.expenses)} sub={t.expenses_cash ? `${money(t.expenses_cash)} from the drawer` : t.expenses ? 'None from the drawer' : 'Nothing spent'} />
+          <Stat label={t('dc.sales')} value={money(tt.sales)}
+            sub={<>{t('common.bills', { count: tt.bills })}{tt.due > 0.5 ? <> · <span className="warn-text strong">{t('pos.due', { money: money(tt.due) })}</span></> : ''}</>} />
+          <Stat label={t('dc.collected')} value={money(tt.collected)}
+            sub={tt.refunds > 0 ? <span className="danger-text">{t('dc.afterHandedBack', { money: money(tt.refunds) })}</span>
+              : tt.coins_sold || tt.packages_sold || tt.advances_received ? t('dc.incl', { list: [tt.coins_sold ? t('dc.inclCoins', { money: money(tt.coins_sold) }) : '', tt.packages_sold ? t('dc.inclPackages', { money: money(tt.packages_sold) }) : '', tt.advances_received ? t('dc.inclAdvances', { money: money(tt.advances_received) }) : ''].filter(Boolean).join(', ') })
+              : t('dc.cashUpiCard')} />
+          <Stat label={t('dc.expectedInDrawer')} value={money(tt.expected_cash)}
+            sub={nu ? <span className="num">+ {fmtNu(tt.expected_cash_nu)}</span> : t('dc.openingN', { money: money(tt.opening_cash) })} />
+          <Stat label={t('nav.expenses')} value={money(tt.expenses)} sub={tt.expenses_cash ? t('dc.fromDrawer', { money: money(tt.expenses_cash) }) : tt.expenses ? t('dc.noneFromDrawer') : t('dc.nothingSpent')} />
         </div>
 
         <div className="split dc-split">
           <div className="stack">
-            <Panel title={<h2 className="row" style={{ gap: 8 }}><Icon name={closed ? 'lock' : 'cash'} size={18} className="dc-title-icon" />Cash in the drawer</h2>}
+            <Panel title={<h2 className="row" style={{ gap: 8 }}><Icon name={closed ? 'lock' : 'cash'} size={18} className="dc-title-icon" />{t('dc.cashInDrawer')}</h2>}
               actions={closed ? <DiffBadge check={cashDifference(closed.counted_cash, closed.expected_cash)} /> : undefined}>
               <div className="stack-lg">
                 <CashRecon s={s} />
@@ -118,33 +127,33 @@ export function DayCloseScreen(p: DayCloseProps) {
 
           <div className="stack">
             <MethodsPanel s={s} date={p.date} />
-            {(t.coins_sold > 0 || t.coins_used > 0 || t.coins_bonus > 0) && (
-              <Panel title={<h2 className="row" style={{ gap: 8 }}><Icon name="coins" size={18} className="coin-title-icon" />Coins</h2>}>
+            {(tt.coins_sold > 0 || tt.coins_used > 0 || tt.coins_bonus > 0) && (
+              <Panel title={<h2 className="row" style={{ gap: 8 }}><Icon name="coins" size={18} className="coin-title-icon" />{t('method.wallet')}</h2>}>
                 <div className="coin-report">
-                  <div><div className="small muted">Sold</div><div className="coin-report-value num">{money(t.coins_sold)}</div><div className="tiny muted">Money received (an advance)</div></div>
-                  <div><div className="small muted">Used on bills</div><div className="coin-report-value num">{fmtCoins(t.coins_used)}</div><div className="tiny muted">Not money received today</div></div>
-                  {t.coins_bonus > 0 && <div><div className="small muted">Bonus given</div><div className="coin-report-value num">{fmtCoins(t.coins_bonus)}</div><div className="tiny muted">With coin packs</div></div>}
+                  <div><div className="small muted">{t('dc.sold')}</div><div className="coin-report-value num">{money(tt.coins_sold)}</div><div className="tiny muted">{t('dc.moneyAdvance')}</div></div>
+                  <div><div className="small muted">{t('dc.usedOnBills')}</div><div className="coin-report-value num">{fmtCoins(tt.coins_used)}</div><div className="tiny muted">{t('dc.notToday')}</div></div>
+                  {tt.coins_bonus > 0 && <div><div className="small muted">{t('dc.bonusGiven')}</div><div className="coin-report-value num">{fmtCoins(tt.coins_bonus)}</div><div className="tiny muted">{t('dc.withPacks')}</div></div>}
                 </div>
               </Panel>
             )}
-            {(t.packages_sold > 0 || t.package_used > 0 || t.package_refunds > 0) && (
-              <Panel title={<h2 className="row" style={{ gap: 8 }}><Icon name="box" size={18} className="pkg-title-icon" />Packages</h2>}>
+            {(tt.packages_sold > 0 || tt.package_used > 0 || tt.package_refunds > 0) && (
+              <Panel title={<h2 className="row" style={{ gap: 8 }}><Icon name="box" size={18} className="pkg-title-icon" />{t('nav.packages')}</h2>}>
                 <div className="coin-report">
-                  <div><div className="small muted">Sold</div><div className="coin-report-value num">{money(t.packages_sold)}</div>
-                    <div className="tiny muted">{t.packages_sold_count} package{t.packages_sold_count === 1 ? '' : 's'} · money received (an advance)</div></div>
-                  <div><div className="small muted">Sessions used on bills</div><div className="coin-report-value num">{money(t.package_used)}</div><div className="tiny muted">Not money received today</div></div>
-                  {t.package_refunds > 0 && <div><div className="small muted">Handed back</div><div className="coin-report-value num danger-text">{money(t.package_refunds)}</div><div className="tiny muted">On cancelled packages</div></div>}
+                  <div><div className="small muted">{t('dc.sold')}</div><div className="coin-report-value num">{money(tt.packages_sold)}</div>
+                    <div className="tiny muted">{t('dc.nPackages', { count: tt.packages_sold_count })} · {t('dc.moneyAdvanceLc')}</div></div>
+                  <div><div className="small muted">{t('dc.sessionsUsed')}</div><div className="coin-report-value num">{money(tt.package_used)}</div><div className="tiny muted">{t('dc.notToday')}</div></div>
+                  {tt.package_refunds > 0 && <div><div className="small muted">{t('rcpt.handedBack')}</div><div className="coin-report-value num danger-text">{money(tt.package_refunds)}</div><div className="tiny muted">{t('dc.onCancelledPackages')}</div></div>}
                 </div>
               </Panel>
             )}
-            {(t.advances_received > 0 || t.advance_used > 0 || t.advance_refunds > 0) && (
-              <Panel title={<h2 className="row" style={{ gap: 8 }}><Icon name="heart" size={18} className="adv-title-icon" />Advances</h2>}
-                actions={<Link className="btn btn-ghost btn-sm no-print" href="/app/events">Events</Link>}>
+            {(tt.advances_received > 0 || tt.advance_used > 0 || tt.advance_refunds > 0) && (
+              <Panel title={<h2 className="row" style={{ gap: 8 }}><Icon name="heart" size={18} className="adv-title-icon" />{t('dc.advances')}</h2>}
+                actions={<Link className="btn btn-ghost btn-sm no-print" href="/app/events">{t('dc.events')}</Link>}>
                 <div className="coin-report">
-                  <div><div className="small muted">Taken</div><div className="coin-report-value num">{money(t.advances_received)}</div>
-                    <div className="tiny muted">{t.advances_received_count} advance{t.advances_received_count === 1 ? '' : 's'} · money received</div></div>
-                  <div><div className="small muted">Used on bills</div><div className="coin-report-value num">{money(t.advance_used)}</div><div className="tiny muted">Not money received today</div></div>
-                  {t.advance_refunds > 0 && <div><div className="small muted">Handed back</div><div className="coin-report-value num danger-text">{money(t.advance_refunds)}</div><div className="tiny muted">Refunded advances</div></div>}
+                  <div><div className="small muted">{t('dc.taken')}</div><div className="coin-report-value num">{money(tt.advances_received)}</div>
+                    <div className="tiny muted">{t('dc.nAdvances', { count: tt.advances_received_count })} · {t('dc.moneyReceived')}</div></div>
+                  <div><div className="small muted">{t('dc.usedOnBills')}</div><div className="coin-report-value num">{money(tt.advance_used)}</div><div className="tiny muted">{t('dc.notToday')}</div></div>
+                  {tt.advance_refunds > 0 && <div><div className="small muted">{t('rcpt.handedBack')}</div><div className="coin-report-value num danger-text">{money(tt.advance_refunds)}</div><div className="tiny muted">{t('dc.refundedAdvances')}</div></div>}
                 </div>
               </Panel>
             )}
@@ -155,9 +164,9 @@ export function DayCloseScreen(p: DayCloseProps) {
 
       <ExpenseSheet open={sheet.open} expense={sheet.expense} onClose={() => setSheet({ open: false, expense: null })}
         defaultDate={p.date} today={p.today} minDate={p.expenseMinDate} staff={p.staff} canDelete={p.canManageExpenses} />
-      <Dialog open={reopenOpen} onClose={() => setReopenOpen(false)} title={p.date === p.today ? 'Reopen today?' : `Reopen ${fmtDateShort(p.date)}?`}
-        footer={<><Button onClick={() => setReopenOpen(false)} disabled={pending}>Cancel</Button><Button variant="primary" icon="unlock" onClick={reopen} loading={pending}>Reopen day</Button></>}>
-        <p className="ink2">The saved close (cash counted {money(closed?.counted_cash ?? 0)}) is removed so bills and expenses can be corrected. Close the day again afterwards — the figures are worked out afresh.</p>
+      <Dialog open={reopenOpen} onClose={() => setReopenOpen(false)} title={p.date === p.today ? t('dc.reopenToday') : t('dc.reopenDate', { date: fmtDateShort(p.date, t.locale) })}
+        footer={<><Button onClick={() => setReopenOpen(false)} disabled={pending}>{t('common.cancel')}</Button><Button variant="primary" icon="unlock" onClick={reopen} loading={pending}>{t('dc.reopenDay')}</Button></>}>
+        <p className="ink2">{t('dc.reopenBody', { money: money(closed?.counted_cash ?? 0) })}</p>
       </Dialog>
     </>
   );
@@ -165,24 +174,25 @@ export function DayCloseScreen(p: DayCloseProps) {
 
 // ---------- Date navigation ----------
 function DateBar({ date, today, recent, onGo }: { date: string; today: string; recent: DayCloseProps['recent']; onGo: (d: string) => void }) {
+  const t = useT();
   return (
     <div className="dc-datebar no-print">
       <div className="row dc-datepick">
-        <Button size="sm" icon="chevronLeft" aria-label="Previous day" onClick={() => onGo(addDays(date, -1))} />
-        <input type="date" className="input input-sm date-input" value={date} max={today} aria-label="Day"
+        <Button size="sm" icon="chevronLeft" aria-label={t('cal.prevDay')} onClick={() => onGo(addDays(date, -1))} />
+        <input type="date" className="input input-sm date-input" value={date} max={today} aria-label={t('dc.day')}
           onChange={(e) => { if (e.target.value && e.target.value <= today) onGo(e.target.value); }} />
-        <Button size="sm" icon="chevronRight" aria-label="Next day" disabled={date >= today} onClick={() => onGo(addDays(date, 1))} />
+        <Button size="sm" icon="chevronRight" aria-label={t('cal.nextDay')} disabled={date >= today} onClick={() => onGo(addDays(date, 1))} />
       </div>
-      <nav className="dc-recent" aria-label="Recent days">
+      <nav className="dc-recent" aria-label={t('dc.recent')}>
         {recent.map((r) => (
           <button key={r.date} type="button" className={`dc-day${r.closed ? ' is-closed' : ''}`} aria-current={r.date === date ? 'date' : undefined} onClick={() => onGo(r.date)}
-            title={r.closed ? `Closed${r.difference != null && Math.abs(r.difference) >= 0.005 ? ` · ${money(Math.abs(r.difference))} ${r.difference > 0 ? 'excess' : 'short'}` : ' · cash matched'}` : 'Not closed'}>
-            <span className="dc-day-name">{r.date === today ? 'Today' : fmtDateShort(r.date).split(',')[0]}</span>
+            title={r.closed ? `${t('dc.closedShort')} · ${r.difference != null && Math.abs(r.difference) >= 0.005 ? t(r.difference > 0 ? 'dc.excessN' : 'dc.shortN', { money: money(Math.abs(r.difference)) }) : t('dc.cashMatched')}` : t('dc.notClosed')}>
+            <span className="dc-day-name">{r.date === today ? t('time.today') : dateParts(r.date, t.locale).wd}</span>
             <span className="dc-day-num num">{Number(r.date.slice(8))}</span>
             <span className={`dc-day-mark${r.closed ? (r.difference != null && r.difference < -0.005 ? ' is-short' : ' is-ok') : ''}`} aria-hidden>
               {r.closed ? <Icon name={r.difference != null && r.difference < -0.005 ? 'alert' : 'check'} size={11} strokeWidth={2.6} /> : null}
             </span>
-            <span className="sr-only">{r.closed ? 'closed' : 'not closed'}</span>
+            <span className="sr-only">{r.closed ? t('dc.closedShort') : t('dc.notClosed')}</span>
           </button>
         ))}
       </nav>
@@ -202,30 +212,31 @@ function ReconRow({ sign, label, sub, value, strong }: { sign?: '+' | '−' | '=
 }
 
 function CashRecon({ s }: { s: DaySummary }) {
-  const t = s.totals;
+  const t = useT();
+  const tt = s.totals;
   const cash = s.by_method.cash ?? { bills: 0, coins: 0, packages: 0, advances: 0, refunds: 0, net: 0 };
   const nuIn = Object.entries(s.by_method).filter(([m]) => m.startsWith('cash_'));
   const nuBills = nuIn.reduce((a, [, r]) => a + r.bills + r.coins + (r.packages || 0) + (r.advances || 0), 0);
   return (
     <div className="stack">
-      <div className="dc-recon" role="table" aria-label="Rupee cash">
-        <ReconRow label="Opening cash" value={money(t.opening_cash)}
-          sub={s.opening.from_date ? `Left in the drawer at the close of ${fmtDateShort(s.opening.from_date)}` : 'No earlier close, so starting from ₹0'} />
-        <ReconRow sign="+" label="Cash from bills" value={money(cash.bills)} sub="Includes later payments on older bills" />
-        {cash.coins > 0 && <ReconRow sign="+" label="Cash for coins sold" value={money(cash.coins)} />}
-        {cash.packages > 0 && <ReconRow sign="+" label="Cash for packages sold" value={money(cash.packages)} />}
-        {cash.advances > 0 && <ReconRow sign="+" label="Cash advances taken" value={money(cash.advances)} />}
-        {t.cash_refunds > 0 && <ReconRow sign="−" label={<span className="danger-text">{t.package_refunds > 0 || t.advance_refunds > 0 ? 'Handed back (cancelled bills, packages, advances)' : 'Handed back on cancelled bills'}</span>} value={money(t.cash_refunds)} />}
-        <ReconRow sign="−" label="Expenses paid in cash" value={money(t.expenses_cash)} />
-        <ReconRow sign="=" label="Expected in the drawer" value={money(t.expected_cash)} strong />
+      <div className="dc-recon" role="table" aria-label={t('dc.rupeeCash')}>
+        <ReconRow label={t('dc.opening')} value={money(tt.opening_cash)}
+          sub={s.opening.from_date ? t('dc.openingFrom', { date: fmtDateShort(s.opening.from_date, t.locale) }) : t('dc.openingNone')} />
+        <ReconRow sign="+" label={t('dc.cashBills')} value={money(cash.bills)} sub={t('dc.cashBillsSub')} />
+        {cash.coins > 0 && <ReconRow sign="+" label={t('dc.cashCoins')} value={money(cash.coins)} />}
+        {cash.packages > 0 && <ReconRow sign="+" label={t('dc.cashPackages')} value={money(cash.packages)} />}
+        {cash.advances > 0 && <ReconRow sign="+" label={t('dc.cashAdvances')} value={money(cash.advances)} />}
+        {tt.cash_refunds > 0 && <ReconRow sign="−" label={<span className="danger-text">{tt.package_refunds > 0 || tt.advance_refunds > 0 ? t('dc.handedBackAll') : t('dc.handedBackBills')}</span>} value={money(tt.cash_refunds)} />}
+        <ReconRow sign="−" label={t('dc.cashExpenses')} value={money(tt.expenses_cash)} />
+        <ReconRow sign="=" label={t('dc.expected')} value={money(tt.expected_cash)} strong />
       </div>
       {showsNu(s) && (
-        <div className="dc-recon dc-recon-nu" role="table" aria-label="Ngultrum cash">
-          <div className="dc-recon-cap tiny muted">Ngultrum cash (counted separately)</div>
-          <ReconRow label="Opening Nu" value={fmtNu(t.opening_cash_nu)} />
-          <ReconRow sign="+" label="Nu received" value={fmtNu(nuBills)} />
-          {t.cash_refunds_nu > 0 && <ReconRow sign="−" label="Handed back" value={fmtNu(t.cash_refunds_nu)} />}
-          <ReconRow sign="=" label="Expected Nu" value={fmtNu(t.expected_cash_nu)} strong />
+        <div className="dc-recon dc-recon-nu" role="table" aria-label={t('dc.nuCash')}>
+          <div className="dc-recon-cap tiny muted">{t('dc.nuCap')}</div>
+          <ReconRow label={t('dc.nuOpening')} value={fmtNu(tt.opening_cash_nu)} />
+          <ReconRow sign="+" label={t('dc.nuReceived')} value={fmtNu(nuBills)} />
+          {tt.cash_refunds_nu > 0 && <ReconRow sign="−" label={t('rcpt.handedBack')} value={fmtNu(tt.cash_refunds_nu)} />}
+          <ReconRow sign="=" label={t('dc.nuExpected')} value={fmtNu(tt.expected_cash_nu)} strong />
         </div>
       )}
     </div>
@@ -233,19 +244,21 @@ function CashRecon({ s }: { s: DaySummary }) {
 }
 
 function DiffBadge({ check, nu }: { check: CashCheck; nu?: boolean }) {
+  const t = useT();
   const amt = nu ? fmtNu(Math.abs(check.amount)) : money(Math.abs(check.amount));
-  if (check.kind === 'balanced') return <Badge tone="success">Matches</Badge>;
-  return check.kind === 'short' ? <Badge tone="danger">{amt} short</Badge> : <Badge tone="marigold">{amt} excess</Badge>;
+  if (check.kind === 'balanced') return <Badge tone="success">{t('dc.matches')}</Badge>;
+  return check.kind === 'short' ? <Badge tone="danger">{t('dc.shortN', { money: amt })}</Badge> : <Badge tone="marigold">{t('dc.excessN', { money: amt })}</Badge>;
 }
 
 function DiffBox({ check, nu, label }: { check: CashCheck | null; nu?: boolean; label: string }) {
-  if (!check) return <div className="dc-diff is-empty"><span className="small muted">{label}</span><span className="dc-diff-value muted">—</span><span className="tiny muted">Enter what you counted</span></div>;
+  const t = useT();
+  if (!check) return <div className="dc-diff is-empty"><span className="small muted">{label}</span><span className="dc-diff-value muted">—</span><span className="tiny muted">{t('dc.enterCounted')}</span></div>;
   const amt = nu ? fmtNu(Math.abs(check.amount)) : money(Math.abs(check.amount));
   return (
     <div className={`dc-diff is-${check.kind}`} aria-live="polite">
       <span className="small">{label}</span>
-      <span className="dc-diff-value num">{check.kind === 'balanced' ? 'Matches' : `${check.kind === 'short' ? 'Short' : 'Excess'} ${amt}`}</span>
-      <span className="tiny">{check.kind === 'balanced' ? 'Counted cash equals expected' : check.kind === 'short' ? 'Less cash than expected — recount, then note why' : 'More cash than expected — a payment may not be recorded'}</span>
+      <span className="dc-diff-value num">{check.kind === 'balanced' ? t('dc.matches') : t(check.kind === 'short' ? 'dc.shortBy' : 'dc.excessBy', { money: amt })}</span>
+      <span className="tiny">{check.kind === 'balanced' ? t('dc.balancedSub') : check.kind === 'short' ? t('dc.shortSub') : t('dc.excessSub')}</span>
     </div>
   );
 }
@@ -259,100 +272,102 @@ function CloseForm({ date, today, s, nu }: { date: string; today: string; s: Day
   const [notes, setNotes] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
-  const t = s.totals;
+  const t = useT();
+  const tt = s.totals;
   const blank = (v: string) => v.trim() === '';
   const countedV = parseAmount(counted);
   const nuV = parseAmount(countedNu);
   const outV = parseAmount(out);
-  const check = blank(counted) ? null : cashDifference(countedV, t.expected_cash);
-  const checkNu = !nu || blank(countedNu) ? null : cashDifference(nuV, t.expected_cash_nu);
+  const check = blank(counted) ? null : cashDifference(countedV, tt.expected_cash);
+  const checkNu = !nu || blank(countedNu) ? null : cashDifference(nuV, tt.expected_cash_nu);
   const left = Math.max(0, countedV - outV);
   const isToday = date === today;
 
   const submit = () => start(async () => {
     setError(null);
-    if (blank(counted)) return setError('Count the cash in the drawer and enter the total (0 if it’s empty).');
-    if (nu && blank(countedNu) && t.expected_cash_nu !== 0) return setError(`Count the Ngultrum too: ${fmtNu(t.expected_cash_nu)} expected.`);
-    if (outV > countedV) return setError('Cash taken out can’t be more than the cash counted.');
-    if (check && check.kind !== 'balanced' && !notes.trim()) return setError(`Add a note about the ${check.kind === 'short' ? 'shortage' : 'excess'} — the owner will see it.`);
+    if (blank(counted)) return setError(t('dc.errCount'));
+    if (nu && blank(countedNu) && tt.expected_cash_nu !== 0) return setError(t('dc.errNu', { nu: fmtNu(tt.expected_cash_nu) }));
+    if (outV > countedV) return setError(t('err.outMore'));
+    if (check && check.kind !== 'balanced' && !notes.trim()) return setError(t(check.kind === 'short' ? 'dc.errNoteShort' : 'dc.errNoteExcess'));
     const r = await closeDay({ date, countedCash: countedV, countedCashNu: nu && !blank(countedNu) ? nuV : null, cashOut: outV, notes });
-    if (!r.ok) return setError(r.error);
-    toast(r.message ?? 'Day closed');
+    if (!r.ok) return setError(t.err(r.error));
+    toast(t('dc.closedToast'));
     router.refresh();
   });
 
   return (
     <form className="dc-form stack" onSubmit={(e) => { e.preventDefault(); submit(); }}>
       <div className="dc-form-head">
-        <h3>Close {isToday ? 'today' : fmtDateShort(date)}</h3>
-        <p className="small muted">Count the notes and coins in the drawer, then enter the total.</p>
+        <h3>{isToday ? t('dc.closeToday') : t('dc.closeDate', { date: fmtDateShort(date, t.locale) })}</h3>
+        <p className="small muted">{t('dc.countHint')}</p>
       </div>
       {error && <Notice tone="error">{error}</Notice>}
       <div className="dc-count">
         <div className="field">
-          <label htmlFor="dc-counted">Cash counted (₹)</label>
+          <label htmlFor="dc-counted">{t('dc.counted')}</label>
           <div className="prefix-input dc-big-input"><span>₹</span>
             <input id="dc-counted" className="input num" inputMode="decimal" autoComplete="off" placeholder="0"
               value={counted} onChange={(e) => setCounted(e.target.value.replace(/[^\d.,]/g, ''))} />
           </div>
         </div>
-        <DiffBox check={check} label="Rupees" />
+        <DiffBox check={check} label={t('dc.rupees')} />
       </div>
       {nu && (
         <div className="dc-count">
           <div className="field">
-            <label htmlFor="dc-counted-nu">Ngultrum counted (Nu)</label>
+            <label htmlFor="dc-counted-nu">{t('dc.nuCounted')}</label>
             <div className="prefix-input dc-big-input"><span>Nu</span>
               <input id="dc-counted-nu" className="input num" inputMode="decimal" autoComplete="off" placeholder="0"
                 value={countedNu} onChange={(e) => setCountedNu(e.target.value.replace(/[^\d.,]/g, ''))} />
             </div>
           </div>
-          <DiffBox check={checkNu} nu label="Ngultrum" />
+          <DiffBox check={checkNu} nu label={t('dc.ngultrum')} />
         </div>
       )}
       <div className="grid-2 dc-form-more">
         <div className="field">
-          <label htmlFor="dc-out">Cash taken out (₹)</label>
+          <label htmlFor="dc-out">{t('dc.out')}</label>
           <div className="prefix-input"><span>₹</span>
             <input id="dc-out" className="input num" inputMode="decimal" autoComplete="off" placeholder="0"
               value={out} onChange={(e) => setOut(e.target.value.replace(/[^\d.,]/g, ''))} />
           </div>
-          <span className="hint">{blank(counted) ? 'Handed to the owner or deposited. The rest opens tomorrow.' : <>Handed over or deposited. <span className="strong num">{money(left)}</span> stays in the drawer for tomorrow.</>}</span>
+          <span className="hint">{blank(counted) ? t('dc.outHint') : rich(t('dc.outHintLeft'), { money: <span className="strong num">{money(left)}</span> })}</span>
         </div>
-        <TextArea label={check && check.kind !== 'balanced' ? 'Note (required)' : 'Note (optional)'} rows={2} maxLength={500} value={notes}
-          placeholder={check?.kind === 'short' ? 'e.g. ₹50 given for parking, not entered' : 'Anything the owner should know'}
+        <TextArea label={check && check.kind !== 'balanced' ? t('dc.noteRequired') : t('dc.noteOptional')} rows={2} maxLength={500} value={notes}
+          placeholder={check?.kind === 'short' ? t('dc.notePhShort') : t('dc.notePh')}
           onChange={(e) => setNotes(e.target.value)} />
       </div>
       <div className="dc-form-foot">
-        <Button type="submit" variant="primary" size="lg" icon="lock" loading={pending}>Close the day</Button>
-        <span className="tiny muted">Saves a copy of these figures. An owner or manager can reopen it.</span>
+        <Button type="submit" variant="primary" size="lg" icon="lock" loading={pending}>{t('dc.closeBtn')}</Button>
+        <span className="tiny muted">{t('dc.closeNote')}</span>
       </div>
     </form>
   );
 }
 
 function ClosedResult({ close, nu }: { close: DayClose; nu: boolean }) {
+  const t = useT();
   const check = cashDifference(close.counted_cash, close.expected_cash);
   const left = close.counted_cash - close.cash_out;
   return (
     <div className="stack">
       <div className="dc-closed">
-        <div><span className="small muted">Counted</span><span className="dc-closed-value num">{money(close.counted_cash)}</span></div>
-        <div><span className="small muted">Expected</span><span className="dc-closed-value num">{money(close.expected_cash)}</span></div>
-        <div className={`is-${check.kind}`}><span className="small muted">Difference</span>
-          <span className="dc-closed-value num">{check.kind === 'balanced' ? 'Matches' : `${check.kind === 'short' ? '−' : '+'}${money(Math.abs(check.amount))}`}</span></div>
+        <div><span className="small muted">{t('dc.countedShort')}</span><span className="dc-closed-value num">{money(close.counted_cash)}</span></div>
+        <div><span className="small muted">{t('dc.expectedShort')}</span><span className="dc-closed-value num">{money(close.expected_cash)}</span></div>
+        <div className={`is-${check.kind}`}><span className="small muted">{t('dc.difference')}</span>
+          <span className="dc-closed-value num">{check.kind === 'balanced' ? t('dc.matches') : `${check.kind === 'short' ? '−' : '+'}${money(Math.abs(check.amount))}`}</span></div>
       </div>
       {nu && close.counted_cash_nu != null && (
         <div className="dc-closed">
-          <div><span className="small muted">Nu counted</span><span className="dc-closed-value num">{fmtNu(close.counted_cash_nu)}</span></div>
-          <div><span className="small muted">Nu expected</span><span className="dc-closed-value num">{fmtNu(close.expected_cash_nu)}</span></div>
-          <div className={`is-${cashDifference(close.counted_cash_nu, close.expected_cash_nu).kind}`}><span className="small muted">Difference</span>
-            <span className="dc-closed-value num">{(() => { const c = cashDifference(close.counted_cash_nu!, close.expected_cash_nu); return c.kind === 'balanced' ? 'Matches' : `${c.amount < 0 ? '−' : '+'}${fmtNu(Math.abs(c.amount))}`; })()}</span></div>
+          <div><span className="small muted">{t('dc.nuCountedShort')}</span><span className="dc-closed-value num">{fmtNu(close.counted_cash_nu)}</span></div>
+          <div><span className="small muted">{t('dc.nuExpectedShort')}</span><span className="dc-closed-value num">{fmtNu(close.expected_cash_nu)}</span></div>
+          <div className={`is-${cashDifference(close.counted_cash_nu, close.expected_cash_nu).kind}`}><span className="small muted">{t('dc.difference')}</span>
+            <span className="dc-closed-value num">{(() => { const c = cashDifference(close.counted_cash_nu!, close.expected_cash_nu); return c.kind === 'balanced' ? t('dc.matches') : `${c.amount < 0 ? '−' : '+'}${fmtNu(Math.abs(c.amount))}`; })()}</span></div>
         </div>
       )}
       <dl className="dc-closed-meta">
-        <div><dt>Taken out</dt><dd className="num">{money(close.cash_out)}{close.cash_out_nu ? ` + ${fmtNu(close.cash_out_nu)}` : ''}</dd></div>
-        <div><dt>Left for tomorrow</dt><dd className="num">{money(left)}{nu && close.counted_cash_nu != null ? ` + ${fmtNu(close.counted_cash_nu - (close.cash_out_nu ?? 0))}` : ''}</dd></div>
+        <div><dt>{t('dc.takenOut')}</dt><dd className="num">{money(close.cash_out)}{close.cash_out_nu ? ` + ${fmtNu(close.cash_out_nu)}` : ''}</dd></div>
+        <div><dt>{t('dc.leftTomorrow')}</dt><dd className="num">{money(left)}{nu && close.counted_cash_nu != null ? ` + ${fmtNu(close.counted_cash_nu - (close.cash_out_nu ?? 0))}` : ''}</dd></div>
       </dl>
       {close.notes && <blockquote className="dc-note">{close.notes}</blockquote>}
     </div>
@@ -360,52 +375,54 @@ function ClosedResult({ close, nu }: { close: DayClose; nu: boolean }) {
 }
 
 // ---------- Team ----------
-function collectedParts(byMethod: Record<string, number>): string[] {
-  return sortMethods(Object.keys(byMethod)).filter((m) => byMethod[m]).map((m) => `${methodLabel(m)} ${m.startsWith('cash_') ? fmtNu(byMethod[m]) : money(byMethod[m])}`);
+function collectedParts(t: Translator, byMethod: Record<string, number>): string[] {
+  return sortMethods(Object.keys(byMethod)).filter((m) => byMethod[m]).map((m) => `${mLabel(t, m)} ${m.startsWith('cash_') ? fmtNu(byMethod[m]) : money(byMethod[m])}`);
 }
-const collectedLine = (byMethod: Record<string, number>) => collectedParts(byMethod).join(' · ');
+const collectedLine = (t: Translator, byMethod: Record<string, number>) => collectedParts(t, byMethod).join(' · ');
 
 function TeamPanel({ rows }: { rows: DaySummary['by_staff'] }) {
+  const t = useT();
   const total = rows.reduce((a, r) => ({ services: a.services + r.services, sales: a.sales + r.sales, collected: a.collected + r.collected }), { services: 0, sales: 0, collected: 0 });
   return (
-    <Panel title="By team member" flush className="dc-clip">
+    <Panel title={t('dc.byTeam')} flush className="dc-clip">
       {rows.length ? (
         <div className="table-wrap">
           <table className="table dc-team">
-            <thead><tr><th>Name</th><th className="right hide-mobile">Services</th><th className="right">Sales <span className="hide-mobile">(before GST)</span></th><th className="right">Took payments</th></tr></thead>
+            <thead><tr><th>{t('common.name')}</th><th className="right hide-mobile">{t('appt.services')}</th><th className="right">{t('dc.sales')} <span className="hide-mobile">{t('dc.beforeGst')}</span></th><th className="right">{t('dc.tookPayments')}</th></tr></thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={`${r.staff_id ?? ''}-${r.user_id ?? ''}-${r.name}`}>
                   <td>
                     <div className="row nowrap"><span className="dot" style={{ background: r.color ?? 'var(--faint)' }} /><span className="strong">{r.name}</span></div>
-                    {r.services > 0 && <div className="tiny muted show-mobile dc-team-sub">{r.services} service{r.services === 1 ? '' : 's'}</div>}
+                    {r.services > 0 && <div className="tiny muted show-mobile dc-team-sub">{t('common.services', { count: r.services })}</div>}
                   </td>
                   <td className="right num hide-mobile">{r.services || <span className="muted">—</span>}</td>
                   <td className="right num">{r.sales ? money(Math.round(r.sales)) : <span className="muted">—</span>}</td>
                   <td className="right">
-                    {r.collected ? <><div className="num strong">{money(r.collected)}</div><div className="tiny muted dc-took">{collectedParts(r.collected_by_method).map((x) => <span key={x}>{x}</span>)}</div></> : <span className="muted">—</span>}
+                    {r.collected ? <><div className="num strong">{money(r.collected)}</div><div className="tiny muted dc-took">{collectedParts(t, r.collected_by_method).map((x) => <span key={x}>{x}</span>)}</div></> : <span className="muted">—</span>}
                   </td>
                 </tr>
               ))}
             </tbody>
-            <tfoot><tr><td className="strong">Total</td><td className="right num hide-mobile">{total.services}</td><td className="right num">{money(Math.round(total.sales))}</td><td className="right num strong">{money(total.collected)}</td></tr></tfoot>
+            <tfoot><tr><td className="strong">{t('common.total')}</td><td className="right num hide-mobile">{total.services}</td><td className="right num">{money(Math.round(total.sales))}</td><td className="right num strong">{money(total.collected)}</td></tr></tfoot>
           </table>
         </div>
-      ) : <p className="panel-body small muted">No services or payments recorded for this day.</p>}
-      <div className="panel-foot tiny muted">Services and sales go to the stylist on each bill line. “Took payments” is whoever recorded the payment or coin sale.</div>
+      ) : <p className="panel-body small muted">{t('dc.teamEmpty')}</p>}
+      <div className="panel-foot tiny muted">{t('dc.teamFoot')}</div>
     </Panel>
   );
 }
 
 // ---------- Red flags ----------
 function VoidsPanel({ voids, tz, date }: { voids: DaySummary['voids']; tz: string; date: string }) {
+  const t = useT();
   if (!voids.length) {
-    return <div className="dc-okline"><Icon name="check" size={16} />No bills cancelled</div>;
+    return <div className="dc-okline"><Icon name="check" size={16} />{t('dc.noVoids')}</div>;
   }
   return (
     <section className="panel dc-flag" aria-labelledby="dc-voids">
       <div className="panel-head">
-        <h2 id="dc-voids" className="row" style={{ gap: 8 }}><Icon name="alert" size={18} />Cancelled bills</h2>
+        <h2 id="dc-voids" className="row" style={{ gap: 8 }}><Icon name="alert" size={18} />{t('dc.voids')}</h2>
         <Badge tone="danger">{voids.length} · {money(voids.reduce((a, v) => a + v.total, 0))}</Badge>
       </div>
       <ul className="list">
@@ -416,17 +433,17 @@ function VoidsPanel({ voids, tz, date }: { voids: DaySummary['voids']; tz: strin
               <div className="between">
                 <div style={{ minWidth: 0 }}>
                   <Link href={`/app/invoices/${v.id}`} className="strong num">{v.invoice_no}</Link>
-                  <span className="muted"> · {v.customer ?? 'Walk-in'}</span>
+                  <span className="muted"> · {v.customer ?? t('common.walkIn')}</span>
                 </div>
                 <span className="num strong dc-void-amt">{money(v.total)}</span>
               </div>
               <div className="small ink2">
-                Cancelled{v.voided_by ? ` by ${v.voided_by}` : ''} at {fmtTime(v.voided_at, tz)}
-                {' · '}billed{v.billed_by ? ` by ${v.billed_by}` : ''} {sameDay ? `at ${fmtTime(v.created_at, tz)}` : `on ${fmtDateShort(localDate(new Date(v.created_at), tz))}`}
+                {v.voided_by ? t('dc.voidedBy', { name: v.voided_by, time: fmtTime(v.voided_at, tz) }) : t('dc.voidedAt', { time: fmtTime(v.voided_at, tz) })}
+                {' · '}{(() => { const when = sameDay ? fmtTime(v.created_at, tz) : fmtDateShort(localDate(new Date(v.created_at), tz), t.locale); return v.billed_by ? t('dc.billedBy', { name: v.billed_by, when }) : t('dc.billedAt', { when }); })()}
               </div>
               {v.reason && <div className="small dc-void-reason">“{v.reason}”</div>}
               {v.paid > 0 && (
-                <div className="tiny danger-text strong">{collectedLine(v.paid_by_method)} had been paid — check it was handed back</div>
+                <div className="tiny danger-text strong">{t('dc.voidPaid', { list: collectedLine(t, v.paid_by_method) })}</div>
               )}
             </li>
           );
@@ -437,22 +454,23 @@ function VoidsPanel({ voids, tz, date }: { voids: DaySummary['voids']; tz: strin
 }
 
 function DiscountsPanel({ s, tz }: { s: DaySummary; tz: string }) {
-  const t = s.totals;
-  if (!s.discounts.length) return <div className="dc-okline is-muted"><Icon name="check" size={16} />No discounts given</div>;
+  const t = useT();
+  const tt = s.totals;
+  if (!s.discounts.length) return <div className="dc-okline is-muted"><Icon name="check" size={16} />{t('dc.noDiscounts')}</div>;
   return (
-    <Panel title="Discounts" flush actions={<span className="small muted num">{t.discounted_bills} bill{t.discounted_bills === 1 ? '' : 's'} · {money(t.discounts)}</span>}>
+    <Panel title={t('dc.discounts')} flush actions={<span className="small muted num">{t('common.bills', { count: tt.discounted_bills })} · {money(tt.discounts)}</span>}>
       <ul className="list">
         {s.discounts.map((d) => {
           const pct = pctOf(d.discount, d.subtotal);
           return (
             <li key={d.id} className="between">
               <div style={{ minWidth: 0 }}>
-                <div><Link href={`/app/invoices/${d.id}`} className="strong num">{d.invoice_no}</Link><span className="muted"> · {d.customer ?? 'Walk-in'}</span></div>
-                <div className="tiny muted">{d.billed_by ? `Billed by ${d.billed_by} · ` : ''}{fmtTime(d.created_at, tz)} · bill {money(d.total)}</div>
+                <div><Link href={`/app/invoices/${d.id}`} className="strong num">{d.invoice_no}</Link><span className="muted"> · {d.customer ?? t('common.walkIn')}</span></div>
+                <div className="tiny muted">{d.billed_by ? `${t('dc.billedByShort', { name: d.billed_by })} · ` : ''}{fmtTime(d.created_at, tz)} · {t('dc.billTotal', { money: money(d.total) })}</div>
               </div>
               <div className="right nowrap">
                 <div className="num strong">−{money(d.discount)}</div>
-                {pct >= 20 ? <Badge tone="marigold">{pct}% off</Badge> : <span className="tiny muted num">{pct}% off</span>}
+                {pct >= 20 ? <Badge tone="marigold">{t('dc.pctOff', { pct })}</Badge> : <span className="tiny muted num">{t('dc.pctOff', { pct })}</span>}
               </div>
             </li>
           );
@@ -464,54 +482,55 @@ function DiscountsPanel({ s, tz }: { s: DaySummary; tz: string }) {
 
 // ---------- Payments ----------
 function MethodsPanel({ s, date }: { s: DaySummary; date: string }) {
+  const t = useT();
   const rows = methodRows(s.by_method);
   const money_ = rows.filter((r) => !isPrepaid(r.method));
   const coins = rows.find((r) => isCoins(r.method));
   const pkg = rows.find((r) => r.method === 'package');
   const adv = rows.find((r) => r.method === 'advance');
   return (
-    <Panel title="Payments" flush className="dc-clip" actions={<Link className="btn btn-ghost btn-sm no-print" href={`/app/invoices?range=custom&from=${date}&to=${date}`}>See bills</Link>}>
+    <Panel title={t('dc.payments')} flush className="dc-clip" actions={<Link className="btn btn-ghost btn-sm no-print" href={`/app/invoices?range=custom&from=${date}&to=${date}`}>{t('dc.seeBills')}</Link>}>
       {money_.length || coins || pkg || adv ? (
         <ul className="list dc-methods">
           {money_.map(({ method, row }) => {
-            const parts = [row.bills ? `Bills ${fmt(method, row.bills)}` : '', row.coins ? `coins sold ${fmt(method, row.coins)}` : '',
-              row.packages ? `packages sold ${fmt(method, row.packages)}` : '', row.advances ? `advances ${fmt(method, row.advances)}` : '',
-              row.refunds ? `handed back ${fmt(method, row.refunds)}` : ''].filter(Boolean);
+            const parts = [row.bills ? t('dc.partBills', { money: fmt(method, row.bills) }) : '', row.coins ? t('dc.partCoins', { money: fmt(method, row.coins) }) : '',
+              row.packages ? t('dc.partPackages', { money: fmt(method, row.packages) }) : '', row.advances ? t('dc.partAdvances', { money: fmt(method, row.advances) }) : '',
+              row.refunds ? t('dc.partRefunds', { money: fmt(method, row.refunds) }) : ''].filter(Boolean);
             return (
               <li key={method} className="row">
                 <span className="dc-method-icon"><Icon name={METHOD_ICON[method] ?? 'wallet'} size={17} /></span>
                 <div className="grow">
-                  <div className="strong">{methodLabel(method)}</div>
+                  <div className="strong">{mLabel(t, method)}</div>
                   {(row.coins > 0 || row.packages > 0 || row.advances > 0 || row.refunds > 0) && <div className="tiny muted">{parts.join(' · ')}</div>}
                 </div>
                 <span className="num strong">{fmt(method, row.net)}</span>
               </li>
             );
           })}
-          <li className="row dc-methods-total"><span className="grow strong">Collected</span><span className="num strong">{money(s.totals.collected)}</span></li>
+          <li className="row dc-methods-total"><span className="grow strong">{t('dc.collected')}</span><span className="num strong">{money(s.totals.collected)}</span></li>
           {coins && (
             <li className="row">
               <span className="dc-method-icon is-coins"><Icon name="coins" size={17} /></span>
-              <div className="grow"><div>Paid with coins</div><div className="tiny muted">From clients’ prepaid balance — not money received today</div></div>
+              <div className="grow"><div>{t('dc.paidCoins')}</div><div className="tiny muted">{t('dc.paidCoinsSub')}</div></div>
               <span className="num muted">{fmtCoins(coins.row.bills - coins.row.refunds)}</span>
             </li>
           )}
           {pkg && (
             <li className="row">
               <span className="dc-method-icon is-coins"><Icon name="box" size={17} /></span>
-              <div className="grow"><div>Package sessions</div><div className="tiny muted">Paid for when the package was sold — not money received today</div></div>
+              <div className="grow"><div>{t('dc.pkgSessions')}</div><div className="tiny muted">{t('dc.pkgSessionsSub')}</div></div>
               <span className="num muted">{money(pkg.row.bills - pkg.row.refunds)}</span>
             </li>
           )}
           {adv && (
             <li className="row">
               <span className="dc-method-icon is-coins"><Icon name="heart" size={17} /></span>
-              <div className="grow"><div>Advances used on bills</div><div className="tiny muted">Counted on the day the advance was taken — not again today</div></div>
+              <div className="grow"><div>{t('dc.advUsed')}</div><div className="tiny muted">{t('dc.advUsedSub')}</div></div>
               <span className="num muted">{money(adv.row.bills - adv.row.refunds)}</span>
             </li>
           )}
         </ul>
-      ) : <p className="panel-body small muted">No payments recorded for this day.</p>}
+      ) : <p className="panel-body small muted">{t('dc.noPayments')}</p>}
     </Panel>
   );
 }
@@ -519,17 +538,18 @@ const fmt = (method: string, n: number) => (method.startsWith('cash_') ? fmtNu(n
 
 // ---------- Expenses ----------
 function ExpensesPanel(p: DayCloseProps & { onAdd: () => void; onEdit: (e: ExpenseRow) => void }) {
+  const t = useT();
   const s = p.summary;
   const cats = Object.entries(s.expenses.by_category).filter(([, v]) => v).sort((a, b) => b[1]! - a[1]!);
   const canAddHere = p.canAddExpense && !p.close && (!p.expenseMinDate || p.date >= p.expenseMinDate);
   return (
-    <Panel title="Expenses" flush className="dc-clip" actions={canAddHere ? <Button size="sm" icon="plus" className="no-print" onClick={p.onAdd}>Add expense</Button> : undefined}>
+    <Panel title={t('nav.expenses')} flush className="dc-clip" actions={canAddHere ? <Button size="sm" icon="plus" className="no-print" onClick={p.onAdd}>{t('dc.addExpense')}</Button> : undefined}>
       {p.expensesHidden ? (
         cats.length ? (
           <ul className="list">
             {cats.map(([c, v]) => <li key={c} className="between"><span>{c}</span><span className="num strong">{money(v!)}</span></li>)}
           </ul>
-        ) : <p className="panel-body small muted">No expenses recorded for this day.</p>
+        ) : <p className="panel-body small muted">{t('dc.noExpenses')}</p>
       ) : p.expenses.length ? (
         <ul className="list">
           {p.expenses.map((e) => {
@@ -538,7 +558,7 @@ function ExpensesPanel(p: DayCloseProps & { onAdd: () => void; onEdit: (e: Expen
               <>
                 <div className="grow" style={{ minWidth: 0 }}>
                   <div className="strong truncate">{e.category}{e.staff_name ? ` · ${e.staff_name}` : ''}</div>
-                  <div className="tiny muted truncate">{[PAID_FROM_LABEL[e.paid_from], e.note, e.created_by_name ? `added by ${e.created_by_name}` : ''].filter(Boolean).join(' · ')}</div>
+                  <div className="tiny muted truncate">{[t(`paidFrom.${e.paid_from}`), e.note, e.created_by_name ? t('dc.addedBy', { name: e.created_by_name }) : ''].filter(Boolean).join(' · ')}</div>
                 </div>
                 <span className="num strong">{money(e.amount)}</span>
               </>
@@ -546,17 +566,17 @@ function ExpensesPanel(p: DayCloseProps & { onAdd: () => void; onEdit: (e: Expen
             return (
               <li key={e.id} style={{ padding: 0 }}>
                 {editable
-                  ? <button type="button" className="dc-exp-row" onClick={() => p.onEdit(e)} aria-label={`Edit ${e.category} ${money(e.amount)}`}>{body}<Icon name="chevronRight" size={16} className="muted no-print" /></button>
+                  ? <button type="button" className="dc-exp-row" onClick={() => p.onEdit(e)} aria-label={t('dc.editExpense', { name: e.category, money: money(e.amount) })}>{body}<Icon name="chevronRight" size={16} className="muted no-print" /></button>
                   : <div className="dc-exp-row">{body}</div>}
               </li>
             );
           })}
-          <li className="between dc-methods-total"><span className="strong">Total</span><span className="num strong">{money(s.totals.expenses)}</span></li>
+          <li className="between dc-methods-total"><span className="strong">{t('common.total')}</span><span className="num strong">{money(s.totals.expenses)}</span></li>
         </ul>
       ) : (
-        <p className="panel-body small muted">{canAddHere ? 'Nothing spent yet. Add tea, supplies or a staff advance paid from the drawer so the cash adds up.' : 'No expenses recorded for this day.'}</p>
+        <p className="panel-body small muted">{canAddHere ? t('dc.nothingSpentYet') : t('dc.noExpenses')}</p>
       )}
-      {p.expensesHidden && <div className="panel-foot tiny muted">The owner and managers can see each expense. You can see today’s and yesterday’s.</div>}
+      {p.expensesHidden && <div className="panel-foot tiny muted">{t('dc.expensesHidden')}</div>}
     </Panel>
   );
 }

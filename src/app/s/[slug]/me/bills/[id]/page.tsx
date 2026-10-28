@@ -6,6 +6,8 @@ import { phoneFromAuth } from '@/lib/phone';
 import { BillView, type CustomerBill } from '@/components/portal/bill-view';
 import { findSiteSalon } from '@/lib/salon-site';
 import { salonSiteBase } from '@/lib/site';
+import { I18nRoot } from '@/lib/i18n/root';
+import { siteLocale } from '@/lib/i18n/server';
 import type { BillType, InvoiceStatus, PayMethod } from '@/lib/types';
 
 export const metadata: Metadata = { title: 'Your bill' };
@@ -13,7 +15,7 @@ export const dynamic = 'force-dynamic';
 
 const ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export default async function Page({ params }: { params: Promise<{ slug: string; id: string }> }) {
+export default async function Page({ params, searchParams }: { params: Promise<{ slug: string; id: string }>; searchParams: Promise<{ lang?: string | string[] }> }) {
   const { slug, id } = await params;
   const site = await findSiteSalon(slug);
   if (!site) notFound();
@@ -82,5 +84,5 @@ export default async function Page({ params }: { params: Promise<{ slug: string;
     payments: ((pays ?? []) as { method: PayMethod; amount: number }[]).map((p) => ({ method: p.method, amount: Number(p.amount) })),
   };
   const phone = phoneFromAuth(auth.user.phone) ?? undefined;
-  return <BillView bill={bill} phone={phone} base={base} />;
+  return <I18nRoot locale={await siteLocale(site.defaultLocale, (await searchParams).lang)}><BillView bill={bill} phone={phone} base={base} /></I18nRoot>;
 }

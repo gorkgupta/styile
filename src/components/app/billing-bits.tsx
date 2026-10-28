@@ -4,6 +4,8 @@ import { Badge } from '@/components/ui/ui';
 import type { IconName } from '@/components/ui/icons';
 import type { InvoiceStatus, PayMethod } from '@/lib/types';
 import { ALL_PAY_METHODS, DEFAULT_PAY_METHODS, METHOD_LABEL } from '@/lib/types';
+import { useT } from '@/lib/i18n/react';
+import type { Translator } from '@/lib/i18n/core';
 
 export const PAY_METHODS: PayMethod[] = ALL_PAY_METHODS;
 
@@ -34,13 +36,17 @@ export const INVOICE_STATUS_LABEL: Record<InvoiceStatus, string> = { paid: 'Paid
 const TONE = { paid: 'success', partial: 'marigold', unpaid: 'danger', void: 'outline' } as const;
 
 export function InvoiceStatusBadge({ status }: { status: InvoiceStatus }) {
-  return <Badge tone={TONE[status]}>{INVOICE_STATUS_LABEL[status]}</Badge>;
+  const t = useT();
+  return <Badge tone={TONE[status]}>{t(`invoice.${status}`)}</Badge>;
 }
 
-/** "UPI", "Cash + UPI", "Package", or "—" when nothing has been paid. */
-export function methodSummary(methods: PayMethod[]): string {
+/** REF_PLACEHOLDER in the page's language. */
+export const refPlaceholder = (t: Translator, m: PayMethod) => t(`pay.ref.${m}`);
+
+/** "UPI", "Cash + UPI", "Package", or "—" when nothing has been paid. Pass t for the page's language. */
+export function methodSummary(methods: PayMethod[], t?: Translator): string {
   const uniq = [...PAY_METHODS, 'package' as const, 'advance' as const].filter((m) => methods.includes(m));
-  return uniq.length ? uniq.map((m) => METHOD_LABEL[m]).join(' + ') : '—';
+  return uniq.length ? uniq.map((m) => (t ? t(`method.${m}`) : METHOD_LABEL[m])).join(' + ') : '—';
 }
 
 /** Parse a rupee amount typed by a person ("1,200", " 450.5 "). Bad input counts as 0. */

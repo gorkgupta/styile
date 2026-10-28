@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/ui';
 import { PortalHeader } from './portal';
 import { AdvanceReceipt, type ReceiptSalon } from '@/components/app/events';
 import type { AdvancePayment, SalonEvent } from '@/lib/types';
+import { useT } from '@/lib/i18n/react';
 
 export interface AdvanceReceiptViewProps {
   advance: AdvancePayment;
@@ -16,13 +17,14 @@ export interface AdvanceReceiptViewProps {
 }
 
 export function AdvanceReceiptView({ advance, salon, customer, event, phone, base }: AdvanceReceiptViewProps) {
+  const t = useT();
   return (
     <div className="pt">
       <div className="no-print"><PortalHeader phone={phone} base={base} salonName={salon.name} /></div>
       <main className="pt-wrap pt-main">
         <div className="between no-print">
-          <Link href={`${base}/me`} className="small">← Your bookings</Link>
-          <Button size="sm" icon="printer" onClick={() => window.print()}>Print or save</Button>
+          <Link href={`${base}/me`} className="small">← {t('pt.yourBookings')}</Link>
+          <Button size="sm" icon="printer" onClick={() => window.print()}>{t('rcpt.printOrSave')}</Button>
         </div>
         <div className="panel pt-receipt">
           <AdvanceReceipt advance={advance} salon={salon} customer={customer} event={event} tz={salon.timezone} />

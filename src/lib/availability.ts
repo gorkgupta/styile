@@ -108,11 +108,11 @@ export function qualifiedStaff<T extends { id: string; bookable: boolean; active
 }
 
 /** Group slots into morning / afternoon / evening for compact pickers. */
-export function groupSlots(slots: Slot[]): { label: string; slots: Slot[] }[] {
+export function groupSlots(slots: Slot[]): { label: string; part: 'morning' | 'afternoon' | 'evening'; slots: Slot[] }[] {
   const groups = [
-    { label: 'Morning', slots: [] as Slot[] },
-    { label: 'Afternoon', slots: [] as Slot[] },
-    { label: 'Evening', slots: [] as Slot[] },
+    { label: 'Morning', part: 'morning' as const, slots: [] as Slot[] },
+    { label: 'Afternoon', part: 'afternoon' as const, slots: [] as Slot[] },
+    { label: 'Evening', part: 'evening' as const, slots: [] as Slot[] },
   ];
   for (const s of slots) {
     const m = hhmmToMinutes(s.time);
