@@ -6,9 +6,10 @@ import type { Invoice, InvoiceItem, Payment } from '@/lib/types';
 
 export const metadata = { title: 'Bill' };
 
-export default async function InvoicePage({ params }: { params: Promise<{ id: string }> }) {
+export default async function InvoicePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ print?: string }> }) {
   const ctx = await requirePermission('bill');
   const { id } = await params;
+  const sp = await searchParams;
   const db = ctx.supabase;
 
   const { data: inv } = await db.from('invoices').select('*').eq('id', id).eq('salon_id', ctx.salon.id).maybeSingle();
@@ -37,7 +38,9 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
       salon={{
         name: s.name, legal_name: s.legal_name, gstin: s.gstin, phone: s.phone, email: s.email,
         address: s.address, city: s.city, state: s.state, pincode: s.pincode, waConnected: !!s.wa_phone_number_id,
+        upiVpa: s.upi_vpa, upiName: s.upi_payee_name, receiptSize: s.receipt_size ?? '80', payMethods: s.payment_methods,
       }}
+      autoPrint={sp.print === '1'}
       staffNames={staffNames}
       tz={s.timezone}
       canVoid={can(ctx.role, 'voidBill')}

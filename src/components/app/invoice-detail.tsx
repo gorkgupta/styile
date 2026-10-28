@@ -1,11 +1,14 @@
 'use client';
-import { useState, useTransition } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Button, Dialog, Notice, TextArea, useToast } from '@/components/ui/ui';
 import { Icon } from '@/components/ui/icons';
 import { Topbar } from './shell';
-import { InvoiceStatusBadge, METHOD_ICON, PAY_METHODS, REF_PLACEHOLDER, parseAmount } from './billing-bits';
+import { deskMethods, InvoiceStatusBadge, isUpiMethod, METHOD_ICON, REF_PLACEHOLDER, parseAmount } from './billing-bits';
+import { printPaper, Receipt } from './receipt';
+import { UpiQr } from '@/components/ui/upi-qr';
+import { isValidVpa } from '@/lib/upi';
 import { addPayment, resendInvoice, voidInvoice } from '@/actions/billing';
 import { amountInWords, money, money2, taxByRate } from '@/lib/billing';
 import { billDocument, placeOfSupply as placeOf } from '@/lib/gst';
@@ -13,7 +16,7 @@ import { coinsText, usableCoins } from '@/lib/coins';
 import { formatPhone } from '@/lib/phone';
 import { fmtDateYear } from '@/lib/periods';
 import { fmtTime } from '@/lib/time';
-import type { Invoice, InvoiceItem, PayMethod, Payment } from '@/lib/types';
+import type { Invoice, InvoiceItem, PayMethod, Payment, ReceiptSize } from '@/lib/types';
 import { METHOD_LABEL } from '@/lib/types';
 
 /** SAC printed on bills issued before per-line codes were stored (0007). */
@@ -27,14 +30,33 @@ export interface InvoiceDetailProps {
   salon: {
     name: string; legal_name: string | null; gstin: string | null; phone: string | null; email: string | null;
     address: string | null; city: string | null; state: string | null; pincode: string | null; waConnected: boolean;
+    /** The salon's own UPI ID: a pay-by-QR is shown while money is due. */
+    upiVpa?: string | null; upiName?: string | null;
+    /** Default paper for printing (Settings); can be changed here before printing. */
+    receiptSize?: ReceiptSize;
+    /** Payment types the desk sees. */
+    payMethods?: PayMethod[];
   };
   staffNames: Record<string, string>;
   tz: string;
   canVoid: boolean;
+  /** Just saved at the POS with "Print receipt" on: print once on arrival. */
+  autoPrint?: boolean;
 }
 
-export function InvoiceDetail({ invoice: inv, items, payments, customer, salon, staffNames, tz, canVoid }: InvoiceDetailProps) {
+const PAPER_LABEL: Record<ReceiptSize, string> = { a4: 'A4 invoice', '80': '80 mm receipt', '58': '58 mm receipt' };
+
+export function InvoiceDetail({ invoice: inv, items, payments, customer, salon, staffNames, tz, canVoid, autoPrint }: InvoiceDetailProps) {
   const router = useRouter();
+  const [paper, setPaper] = useState<ReceiptSize>(salon.receiptSize ?? 'a4');
+  const printed = useRef(false);
+  useEffect(() => {
+    if (!autoPrint || printed.current) return;
+    printed.current = true;
+    // Let the receipt lay out (and fonts load) before measuring it for the page size.
+    const t = setTimeout(() => { printPaper(paper); router.replace(`/app/invoices/${inv.id}`); }, 350);
+    return () => clearTimeout(t);
+  }, [autoPrint, paper, inv.id, router]);
   const toast = useToast();
   const [pending, start] = useTransition();
   const [payOpen, setPayOpen] = useState(false);
@@ -59,6 +81,9 @@ export function InvoiceDetail({ invoice: inv, items, payments, customer, salon, 
   const totalQty = items.reduce((s, i) => s + Number(i.qty), 0);
 
   const coinBalance = Number(customer?.coin_balance ?? 0);
+  const upi = isValidVpa(salon.upiVpa) ? { vpa: salon.upiVpa, name: salon.upiName || salon.name } : null;
+  const methods = deskMethods(salon.payMethods, { clientHasCoins: coinBalance > 0 });
+  const payAmt = parseAmount(amount);
   const coinsPaid = payments.filter((p) => p.method === 'wallet').reduce((s, p) => s + Number(p.amount), 0);
   const coinsBlocked = !customer ? 'This bill has no client, so coins can’t be used.' : coinBalance <= 0 ? `${customer.name.split(' ')[0]} has no coins.` : null;
   const pickMethod = (m: PayMethod) => {
@@ -66,7 +91,7 @@ export function InvoiceDetail({ invoice: inv, items, payments, customer, salon, 
     if (m === 'wallet') setAmount(String(usableCoins(coinBalance, due)));
     else if (method === 'wallet') setAmount(String(due));
   };
-  const openPay = () => { setError(null); setMethod('upi'); setAmount(String(due)); setReference(''); setPayOpen(true); };
+  const openPay = () => { setError(null); setMethod(methods.includes('upi') ? 'upi' : methods[0]); setAmount(String(due)); setReference(''); setPayOpen(true); };
   const savePayment = () => start(async () => {
     setError(null);
     const amt = parseAmount(amount);
@@ -94,7 +119,12 @@ export function InvoiceDetail({ invoice: inv, items, payments, customer, salon, 
     <>
       <Topbar back="/app/invoices" title={<span className="row">Bill {inv.invoice_no} <InvoiceStatusBadge status={inv.status} /></span>}
         subtitle={`${customer?.name ?? 'Walk-in'} · ${fmtDateYear(inv.created_at, tz)}, ${fmtTime(inv.created_at, tz)}`}
-        actions={<Button icon="printer" onClick={() => window.print()}><span className="hide-mobile">Print</span></Button>} />
+        actions={<div className="row invoice-print">
+          <select className="select input-sm" value={paper} aria-label="Paper to print on" onChange={(e) => setPaper(e.target.value as ReceiptSize)}>
+            {(Object.keys(PAPER_LABEL) as ReceiptSize[]).map((k) => <option key={k} value={k}>{PAPER_LABEL[k]}</option>)}
+          </select>
+          <Button icon="printer" onClick={() => printPaper(paper)}><span className="hide-mobile">Print</span></Button>
+        </div>} />
       <div className="page invoice-page">
         <div className="invoice-actions no-print">
           {!isVoid && due > 0 && <Button variant="primary" icon="wallet" onClick={openPay}>Record payment · {money(due)}</Button>}
@@ -108,6 +138,13 @@ export function InvoiceDetail({ invoice: inv, items, payments, customer, salon, 
         {isVoid && <div className="no-print"><Notice tone="error">This bill was cancelled{inv.void_reason ? `: ${inv.void_reason}` : ''}. Its number stays used and it is left out of your sales and GST totals.</Notice></div>}
         {!isVoid && doc.showGstin && !gstin && <div className="no-print"><Notice tone="warn">Add your GSTIN in <Link href="/app/settings#billing">Settings</Link> so it prints on your bills.</Notice></div>}
 
+        {paper !== 'a4' ? (
+          <div className="receipt-stage">
+            <Receipt width={paper} invoice={inv} items={items} payments={payments} customer={customer} staffNames={staffNames} tz={tz}
+              salon={{ ...salon, upiVpa: upi?.vpa ?? null, upiName: upi?.name ?? null }} />
+            <p className="tiny muted no-print">Shown at its printed width. Choose “A4 invoice” above for a full-page bill.</p>
+          </div>
+        ) : (
         <article className={`invoice-doc${isVoid ? ' is-cancelled' : ''}`} aria-label={`${doc.title} ${inv.invoice_no}`}>
           {isVoid && <div className="invoice-watermark" aria-hidden>CANCELLED</div>}
           <header className="invoice-head">
@@ -230,6 +267,12 @@ export function InvoiceDetail({ invoice: inv, items, payments, customer, salon, 
                 </div>
               )}
               {inv.notes && <div><div className="tiny muted invoice-label">Note</div><div className="small">{inv.notes}</div></div>}
+              {!isVoid && due > 0 && upi && (
+                <div className="invoice-upi">
+                  <div className="tiny muted invoice-label">Pay by UPI</div>
+                  <UpiQr vpa={upi.vpa} name={upi.name} amount={due} note={`Bill ${inv.invoice_no}`} size={132} />
+                </div>
+              )}
             </div>
             <dl className="totals invoice-totals">
               <dt>Subtotal</dt><dd>{money2(inv.subtotal)}</dd>
@@ -255,6 +298,7 @@ export function InvoiceDetail({ invoice: inv, items, payments, customer, salon, 
             <div className="tiny muted">{doc.showTax && inv.prices_include_tax ? 'Prices are inclusive of GST. ' : ''}This is a computer-generated {doc.noun} and needs no signature.</div>
           </footer>
         </article>
+        )}
       </div>
 
       <Dialog open={payOpen} onClose={() => setPayOpen(false)} title="Record payment"
@@ -263,7 +307,7 @@ export function InvoiceDetail({ invoice: inv, items, payments, customer, salon, 
         <div className="field">
           <span className="label">Paid by</span>
           <div className="row-wrap">
-            {PAY_METHODS.map((m) => (
+            {methods.map((m) => (
               <button key={m} type="button" className="chip chip-sm" aria-pressed={method === m} onClick={() => pickMethod(m)}
                 disabled={m === 'wallet' && !!coinsBlocked} title={m === 'wallet' ? coinsBlocked ?? undefined : undefined}>
                 <Icon name={METHOD_ICON[m]} size={14} />{METHOD_LABEL[m]}
@@ -278,7 +322,11 @@ export function InvoiceDetail({ invoice: inv, items, payments, customer, salon, 
           <label htmlFor="pay-amt">Amount</label>
           <div className="prefix-input"><span>₹</span><input id="pay-amt" className="input num" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus /></div>
         </div>
-        {method !== 'cash' && method !== 'wallet' && <input className="input" placeholder={REF_PLACEHOLDER[method]} value={reference} onChange={(e) => setReference(e.target.value)} aria-label="Payment reference" />}
+        {method !== 'cash' && method !== 'cash_nu' && method !== 'wallet' && <input className="input" placeholder={REF_PLACEHOLDER[method]} value={reference} onChange={(e) => setReference(e.target.value)} aria-label="Payment reference" />}
+        {isUpiMethod(method) && payAmt > 0 && (upi
+          ? <UpiQr vpa={upi.vpa} name={upi.name} amount={payAmt} note={`Bill ${inv.invoice_no}`} size={150} />
+          : <p className="tiny muted">Add your UPI ID in <Link href="/app/settings#payments">Settings</Link> to show a pay-by-QR here.</p>)}
+        {method === 'upi_bhutan' && payAmt > 10000 && <p className="tiny warn-text">Bhutanese bank apps allow up to ₹10,000 a payment (₹25,000 a day). Split it, or take the rest another way.</p>}
         {error && <Notice tone="error">{error}</Notice>}
       </Dialog>
 

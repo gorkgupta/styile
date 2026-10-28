@@ -372,8 +372,10 @@ function SourcesPanel({ bySource }: { bySource: Partial<Record<BookingSource, nu
   );
 }
 
-const METHOD_ORDER: PayMethod[] = ['upi', 'card', 'cash', 'wallet', 'other'];
-const METHOD_COLOR: Record<PayMethod, string> = { upi: '#0F6E73', card: '#7A3FB8', cash: '#C2541B', wallet: '#2F6DB5', other: '#7A7486' };
+const METHOD_ORDER: PayMethod[] = ['upi', 'upi_bhutan', 'card', 'cash', 'cash_nu', 'wallet', 'other'];
+const METHOD_COLOR: Record<PayMethod, string> = {
+  upi: '#0F6E73', upi_bhutan: '#4FA89B', card: '#7A3FB8', cash: '#C2541B', cash_nu: '#9A6B00', wallet: '#2F6DB5', other: '#7A7486',
+};
 
 function MethodsPanel({ byMethod }: { byMethod: Partial<Record<PayMethod, number>> }) {
   const present = METHOD_ORDER.filter((m) => n(byMethod[m]) > 0);

@@ -40,11 +40,14 @@ const billSalon = (x: Salon) => ({
   name: x.name, legal_name: x.legal_name, gstin: x.gstin, phone: x.phone, email: x.email,
   address: x.address, city: x.city, state: x.state, pincode: x.pincode, waConnected: !!x.wa_phone_number_id,
 });
-const salonForBill = billSalon(regularSalon);
+const salonForBill = { ...billSalon(regularSalon), upiVpa: regularSalon.upi_vpa, upiName: regularSalon.upi_payee_name, receiptSize: 'a4' as const, payMethods: regularSalon.payment_methods };
 const posSalon = (x: Salon) => ({ gstMode: x.gst_mode, pricesIncludeTax: x.prices_include_tax, serviceRate: 5, waConnected: !!x.wa_phone_number_id,
-  nextInvoiceNo: `${x.invoice_prefix}-${String(x.next_invoice_no).padStart(5, '0')}` });
+  nextInvoiceNo: `${x.invoice_prefix}-${String(x.next_invoice_no).padStart(5, '0')}`,
+  payMethods: x.payment_methods, upi: x.upi_vpa ? { vpa: x.upi_vpa, name: x.upi_payee_name ?? x.name } : null, receiptSize: x.receipt_size });
+const withPay = (x: Salon, paper?: Salon['receipt_size']) => ({ ...billSalon(x), upiVpa: x.upi_vpa, upiName: x.upi_payee_name, receiptSize: paper ?? 'a4', payMethods: x.payment_methods });
 const customerBillOf = (x: Salon, b: typeof taxInvoice, customer: { name: string; phone: string } | null): CustomerBill => ({
-  salon: { name: x.name, legalName: x.legal_name, gstin: x.gstin, address: x.address, city: x.city, state: x.state, pincode: x.pincode, phone: x.phone, slug: x.slug, timezone: x.timezone },
+  salon: { name: x.name, legalName: x.legal_name, gstin: x.gstin, address: x.address, city: x.city, state: x.state, pincode: x.pincode, phone: x.phone, slug: x.slug, timezone: x.timezone,
+    upiVpa: x.upi_vpa, upiName: x.upi_payee_name },
   invoice: b.invoice, customer,
   items: b.items.map((i) => ({ ...i, stylist: i.staff_id ? staff.find((s) => s.id === i.staff_id)?.name ?? null : null })),
   payments: b.payments.map((p) => ({ method: p.method, amount: p.amount })),
@@ -140,14 +143,44 @@ export const screens: Record<string, { title: string; render: () => ReactNode }>
     title: 'Bill of supply (composition scheme)',
     render: () => (
       <InvoiceDetail invoice={bosInvoice.invoice} items={bosInvoice.items} payments={bosInvoice.payments}
-        customer={jaigaonClients['cu-j1']} salon={billSalon(bosSalon)} staffNames={staffNames} tz={TZ} canVoid />
+        customer={jaigaonClients['cu-j1']} salon={withPay(bosSalon)} staffNames={staffNames} tz={TZ} canVoid />
     ),
   },
   '/app/invoices/plain': {
     title: 'Plain bill (not GST registered, part paid)',
     render: () => (
       <InvoiceDetail invoice={plainInvoice.invoice} items={plainInvoice.items} payments={plainInvoice.payments}
-        customer={jaigaonClients['cu-j2']} salon={billSalon(plainSalon)} staffNames={staffNames} tz={TZ} canVoid={false} />
+        customer={jaigaonClients['cu-j2']} salon={withPay(plainSalon)} staffNames={staffNames} tz={TZ} canVoid={false} />
+    ),
+  },
+  '/app/invoices/x1/receipt80': {
+    title: 'Receipt 80 mm (tax invoice, paid)',
+    render: () => (
+      <InvoiceDetail invoice={taxInvoice.invoice} items={taxInvoice.items} payments={taxInvoice.payments}
+        customer={{ id: lakshmi.id, name: lakshmi.name, phone: lakshmi.phone, email: null }}
+        salon={withPay(regularSalon, '80')} staffNames={staffNames} tz={TZ} canVoid />
+    ),
+  },
+  '/app/invoices/due/receipt80': {
+    title: 'Receipt 80 mm (tax invoice, balance due → UPI QR)',
+    render: () => (
+      <InvoiceDetail invoice={{ ...taxInvoice.invoice, status: 'partial', paid_total: 5000 }} items={taxInvoice.items} payments={taxInvoice.payments.slice(0, 1)}
+        customer={{ id: lakshmi.id, name: lakshmi.name, phone: lakshmi.phone, email: null }}
+        salon={withPay(regularSalon, '80')} staffNames={staffNames} tz={TZ} canVoid />
+    ),
+  },
+  '/app/invoices/plain/receipt58': {
+    title: 'Receipt 58 mm (plain bill, Nu cash, balance due → UPI QR)',
+    render: () => (
+      <InvoiceDetail invoice={plainInvoice.invoice} items={plainInvoice.items} payments={plainInvoice.payments}
+        customer={jaigaonClients['cu-j2']} salon={withPay(plainSalon, '58')} staffNames={staffNames} tz={TZ} canVoid={false} />
+    ),
+  },
+  '/app/invoices/bos/receipt58': {
+    title: 'Receipt 58 mm (bill of supply)',
+    render: () => (
+      <InvoiceDetail invoice={bosInvoice.invoice} items={bosInvoice.items} payments={bosInvoice.payments}
+        customer={jaigaonClients['cu-j1']} salon={withPay(bosSalon, '58')} staffNames={staffNames} tz={TZ} canVoid />
     ),
   },
   '/me/bills/x1': { title: 'Client bill (tax invoice)', render: () => <BillView bill={customerBillOf(regularSalon, taxInvoice, { name: lakshmi.name, phone: lakshmi.phone })} phone={lakshmi.phone} base="" /> },

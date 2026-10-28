@@ -4,6 +4,7 @@ import { requirePermission } from '@/lib/context';
 import { getMenu, getTeam } from '@/lib/queries';
 import { fmtTime, localDate } from '@/lib/time';
 import { serviceGstRate } from '@/lib/gst';
+import { isValidVpa } from '@/lib/upi';
 import type { ClientLite } from '@/actions/appointments';
 
 export const metadata = { title: 'New bill' };
@@ -50,6 +51,9 @@ export default async function PosPage({ searchParams }: { searchParams: Promise<
         gstMode: ctx.salon.gst_mode,
         pricesIncludeTax: ctx.salon.prices_include_tax,
         serviceRate: serviceGstRate(localDate(new Date(), ctx.salon.timezone)),
+        payMethods: ctx.salon.payment_methods,
+        upi: isValidVpa(ctx.salon.upi_vpa) ? { vpa: ctx.salon.upi_vpa, name: ctx.salon.upi_payee_name || ctx.salon.name } : null,
+        receiptSize: ctx.salon.receipt_size ?? '80',
         waConnected: !!ctx.salon.wa_phone_number_id,
         nextInvoiceNo: `${ctx.salon.invoice_prefix}-${String(ctx.salon.next_invoice_no).padStart(5, '0')}`,
       }}

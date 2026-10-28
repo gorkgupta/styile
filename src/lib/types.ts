@@ -6,7 +6,9 @@ export type { BillType, GstMode } from './gst';
 export type MemberRole = 'owner' | 'manager' | 'receptionist' | 'stylist';
 export type ApptStatus = 'waiting' | 'booked' | 'confirmed' | 'checked_in' | 'in_service' | 'completed' | 'cancelled' | 'no_show';
 export type BookingSource = 'walk_in' | 'phone' | 'online' | 'whatsapp' | 'staff';
-export type PayMethod = 'cash' | 'upi' | 'card' | 'wallet' | 'other';
+/** cash_nu = Bhutanese Ngultrum notes (at par), upi_bhutan = a Bhutanese bank app paying the salon's UPI QR (0008). */
+export type PayMethod = 'cash' | 'upi' | 'card' | 'wallet' | 'other' | 'cash_nu' | 'upi_bhutan';
+export type ReceiptSize = 'a4' | '80' | '58';
 export type InvoiceStatus = 'paid' | 'partial' | 'unpaid' | 'void';
 export type Hours = Partial<Record<'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun', [string, string][]>>;
 
@@ -25,6 +27,12 @@ export interface Salon {
   wa_phone_number_id: string | null; wa_business_account_id: string | null; wa_display_number: string | null;
   wa_bot_enabled: boolean; wa_bot_instructions: string | null;
   coins_enabled: boolean; coin_packs: CoinPack[];
+  /** Payment types the front desk sees (0010). Coins stay spendable for clients who have them. */
+  payment_methods: PayMethod[];
+  /** The salon's own UPI ID and name for pay-by-QR; money goes straight to the salon. */
+  upi_vpa: string | null; upi_payee_name: string | null;
+  /** What the bill page prints by default: A4 invoice or an 80/58 mm thermal receipt. */
+  receipt_size: ReceiptSize;
   created_at: string;
 }
 
@@ -154,7 +162,12 @@ export const STATUS_LABEL: Record<ApptStatus, string> = {
 export const SOURCE_LABEL: Record<BookingSource, string> = {
   walk_in: 'Walk-in', phone: 'Phone', online: 'Online', whatsapp: 'WhatsApp', staff: 'Front desk',
 };
-export const METHOD_LABEL: Record<PayMethod, string> = { cash: 'Cash', upi: 'UPI', card: 'Card', wallet: 'Coins', other: 'Other' };
+export const METHOD_LABEL: Record<PayMethod, string> = {
+  cash: 'Cash', upi: 'UPI', card: 'Card', wallet: 'Coins', other: 'Other', cash_nu: 'Cash (Nu)', upi_bhutan: 'UPI (Bhutan)',
+};
+/** Every payment type, in the order the desk sees them. */
+export const ALL_PAY_METHODS: PayMethod[] = ['cash', 'upi', 'card', 'cash_nu', 'upi_bhutan', 'wallet', 'other'];
+export const DEFAULT_PAY_METHODS: PayMethod[] = ['cash', 'upi', 'card', 'wallet'];
 export const COIN_KIND_LABEL: Record<CoinKind, string> = {
   load: 'Bought coins', bonus: 'Bonus coins', spend: 'Paid a bill', refund: 'Refund (bill cancelled)', adjust: 'Adjustment',
 };

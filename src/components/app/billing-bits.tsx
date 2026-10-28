@@ -3,15 +3,32 @@
 import { Badge } from '@/components/ui/ui';
 import type { IconName } from '@/components/ui/icons';
 import type { InvoiceStatus, PayMethod } from '@/lib/types';
-import { METHOD_LABEL } from '@/lib/types';
+import { ALL_PAY_METHODS, DEFAULT_PAY_METHODS, METHOD_LABEL } from '@/lib/types';
 
-export const PAY_METHODS: PayMethod[] = ['cash', 'upi', 'card', 'wallet', 'other'];
+export const PAY_METHODS: PayMethod[] = ALL_PAY_METHODS;
 
-export const METHOD_ICON: Record<PayMethod, IconName> = { cash: 'cash', upi: 'upi', card: 'card', wallet: 'coins', other: 'more' };
+export const METHOD_ICON: Record<PayMethod, IconName> = {
+  cash: 'cash', upi: 'upi', card: 'card', wallet: 'coins', other: 'more', cash_nu: 'cash', upi_bhutan: 'upi',
+};
 
 export const REF_PLACEHOLDER: Record<PayMethod, string> = {
   cash: 'Note (optional)', upi: 'UPI ref no. (optional)', card: 'Last 4 digits (optional)', wallet: 'Note (optional)', other: 'Details (optional)',
+  cash_nu: 'Note (optional)', upi_bhutan: 'Bank app ref no. (optional)',
 };
+
+/** UPI-type payments that can be collected with the salon's QR (Bhutanese apps scan the same Indian QR). */
+export const isUpiMethod = (m: PayMethod) => m === 'upi' || m === 'upi_bhutan';
+
+/**
+ * Payment types to offer at the desk: the salon's choice (Settings), in the usual order. Coins are always offered
+ * when the client has some, even if the salon has hidden them, so a balance can never get stuck.
+ */
+export function deskMethods(enabled: PayMethod[] | null | undefined, opts: { clientHasCoins?: boolean; keep?: PayMethod[] } = {}): PayMethod[] {
+  const on = new Set<PayMethod>(enabled?.length ? enabled : DEFAULT_PAY_METHODS);
+  if (opts.clientHasCoins) on.add('wallet');
+  for (const m of opts.keep ?? []) on.add(m);
+  return PAY_METHODS.filter((m) => on.has(m));
+}
 
 export const INVOICE_STATUS_LABEL: Record<InvoiceStatus, string> = { paid: 'Paid', partial: 'Part paid', unpaid: 'Unpaid', void: 'Cancelled' };
 const TONE = { paid: 'success', partial: 'marigold', unpaid: 'danger', void: 'outline' } as const;
