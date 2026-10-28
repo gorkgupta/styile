@@ -8,6 +8,7 @@ import { claimMyProfiles } from '@/actions/portal';
 import { formatPhone } from '@/lib/phone';
 import { safeNextPath } from '@/lib/safe-next';
 import { usePhoneOtp } from '@/components/public/phone-otp';
+import { PhoneInput } from '@/components/ui/phone-input';
 import { PortalHeader } from './portal';
 
 /** Client sign-in with a WhatsApp code. After verifying, links this number's client records across salons. */
@@ -41,15 +42,7 @@ export function PortalLogin({ next, base, salonName }: { next?: string; base: st
           </div>
           <form onSubmit={submit} className="stack" style={{ width: '100%' }}>
             {otp.stage === 'phone' ? (
-              <div className="field">
-                <label htmlFor="pt-phone">Mobile number</label>
-                <div className="prefix-input">
-                  <span>+91</span>
-                  <input id="pt-phone" className="input" inputMode="numeric" autoComplete="tel-national" placeholder="98765 43210" maxLength={14}
-                    value={otp.phoneInput} onChange={(e) => otp.setPhoneInput(e.target.value)} autoFocus aria-invalid={!!otp.error || undefined} />
-                </div>
-                {otp.error && <span className="error-text" role="alert">{otp.error}</span>}
-              </div>
+              <PhoneInput id="pt-phone" label="Mobile number" value={otp.phoneInput} onChange={otp.setPhoneInput} error={otp.error} autoFocus />
             ) : (
               <div className="field">
                 <label htmlFor="pt-code">Code sent to {formatPhone(otp.digits)}</label>

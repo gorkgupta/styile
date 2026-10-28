@@ -11,6 +11,7 @@ import { branch, categories, hours, invoiceItems, invoices, NOW_ISO, payments, s
 import { previewSkills, profiledStaff } from '../stylist-data';
 import { toPublicStylist } from '../../src/lib/stylists';
 import { ananyaCoinHistory, ananyaCoins } from '../coins-data';
+import { phoneScreens } from '../phone-screens';
 
 const staff = profiledStaff;
 
@@ -92,6 +93,7 @@ export const screens: Record<string, { title: string; render: () => ReactNode }>
   '/reset': { title: 'Reset password', render: () => <ResetPasswordForm /> },
   '/me': { title: 'Client portal', render: () => <PortalHome {...portalProps} /> },
   '/me/login': { title: 'Client log in', render: () => <PortalLogin base="" salonName={salon.name} /> },
+  ...phoneScreens(bookingProps), // Bhutan (+975) client: booking OTP step and front-desk quick add
   '/me/bills/[id]': { title: 'Client bill', render: () => <BillView bill={customerBill} phone="919811112222" base="" /> },
   '/admin': { title: 'Platform admin', render: () => <AdminConsole salons={adminSalons} nowIso={NOW_ISO} adminName="Styile team" hasSalon /> },
   '/s/[slug]': { title: 'Public booking page', render: () => <BookingFlow {...bookingProps} /> },

@@ -5,7 +5,7 @@ import { can } from '@/lib/permissions';
 import { fail, must } from '@/lib/actions';
 import { checkCoinPacks } from '@/lib/coins';
 import { cleanHours } from '@/lib/hours';
-import { normalizePhone } from '@/lib/phone';
+import { invalidPhoneMessage, normalizePhone } from '@/lib/phone';
 import type { ActionResult, CoinPack, Hours } from '@/lib/types';
 
 // Salon settings. Only the owner can change these (RLS: salons_owner_update). Subscription, booking link
@@ -45,7 +45,7 @@ export async function updateSalonProfile(input: SalonProfileInput): Promise<Acti
     let phone: string | null = null;
     if (input.phone && input.phone.trim()) {
       phone = normalizePhone(input.phone);
-      if (!phone) return { ok: false, error: 'Enter a valid phone number with area or mobile code.' };
+      if (!phone) return { ok: false, error: `${invalidPhoneMessage(input.phone).replace(/\.$/, '')}, or leave it blank.` };
     }
     const email = (input.email ?? '').trim().toLowerCase() || null;
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return { ok: false, error: 'Enter a valid email address, or leave it blank.' };

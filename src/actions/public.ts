@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { BookingError, createBooking, findOrCreateCustomer, getAvailability, loadCatalog } from '@/lib/booking';
 import { notifyBookingConfirmed } from '@/lib/whatsapp/outbox';
 import { fail } from '@/lib/actions';
-import { normalizePhone } from '@/lib/phone';
+import { phoneFromAuth } from '@/lib/phone';
 import { addDays, dayKeyOf, fmtDateTime, isValidDateStr, localDate } from '@/lib/time';
 import { qualifiedStaff, type Slot } from '@/lib/availability';
 import { earliestByStylist, shownOnline, type NextFreeResult } from '@/lib/stylists';
@@ -121,7 +121,7 @@ export async function bookOnline(input: BookOnlineInput): Promise<ActionResult<B
     const { data: auth } = await supabase.auth.getUser();
     const user = auth.user;
     if (!user) return { ok: false, error: 'Verify your mobile number to book.' };
-    const phone = user.phone_confirmed_at ? normalizePhone(user.phone ?? '') : null;
+    const phone = user.phone_confirmed_at ? phoneFromAuth(user.phone) : null;
     if (!phone) return { ok: false, error: 'Verify your mobile number to book.' };
 
     const salonId = await publicSalonId(input.slug);

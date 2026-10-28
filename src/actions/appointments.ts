@@ -5,7 +5,7 @@ import { notifyBookingConfirmed } from '@/lib/whatsapp/outbox';
 import { getSalonContext } from '@/lib/context';
 import { fail, must } from '@/lib/actions';
 import { getAvailability, loadCatalog, BookingError } from '@/lib/booking';
-import { normalizePhone } from '@/lib/phone';
+import { invalidPhoneMessage, normalizePhone } from '@/lib/phone';
 import type { Slot } from '@/lib/availability';
 import type { ActionResult, ApptStatus } from '@/lib/types';
 
@@ -33,7 +33,7 @@ export async function quickCreateClient(input: { name: string; phone: string }):
     const { supabase, salon } = await getSalonContext();
     const phone = normalizePhone(input.phone);
     if (!input.name.trim()) return { ok: false, error: 'Enter the client’s name.' };
-    if (!phone) return { ok: false, error: 'Enter a valid 10-digit mobile number.' };
+    if (!phone) return { ok: false, error: invalidPhoneMessage(input.phone) };
     const existing = await supabase.from('customers').select('id, name, phone, visit_count, last_visit_at, coin_balance').eq('salon_id', salon.id).eq('phone', phone).maybeSingle();
     if (existing.data) return { ok: true, data: existing.data as ClientLite, message: 'This number is already a client — selected them.' };
     const row = must(await supabase.from('customers').insert({ salon_id: salon.id, name: input.name.trim(), phone })

@@ -8,6 +8,7 @@ import { Topbar } from './shell';
 import { HoursEditor } from './hours-editor';
 import { updateAssistant, updateBilling, updateBusinessHours, updateCoinSettings, updateOnlineBooking, updateSalonProfile } from '@/actions/settings';
 import { formatPhone } from '@/lib/phone';
+import { PhoneInput } from '@/components/ui/phone-input';
 import { PLAN_LABEL, PLAN_STATUS_LABEL, planById } from '@/lib/plans';
 import { money } from '@/lib/billing';
 import { checkCoinPacks, DEFAULT_COIN_PACKS, fmtCoins, MAX_COIN_PACKS } from '@/lib/coins';
@@ -140,7 +141,7 @@ function ProfileSection({ salon }: { salon: Salon }) {
             onChange={(e) => setF((x) => ({ ...x, gstin: e.target.value.toUpperCase().replace(/\s/g, '') }))}
             hint="Leave blank if you aren’t GST registered — bills will say “Bill of supply”." />
           <div className="grid-2 tight">
-            <TextField label="Phone" inputMode="tel" value={f.phone} onChange={set('phone')} placeholder="98450 12345" />
+            <PhoneInput label="Phone" value={f.phone} onChange={(v) => setF((x) => ({ ...x, phone: v }))} />
             <TextField label="Email" type="email" value={f.email} onChange={set('email')} />
           </div>
         </div>

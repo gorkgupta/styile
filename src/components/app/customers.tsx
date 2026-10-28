@@ -9,6 +9,7 @@ import { saveCustomer } from '@/actions/customers';
 import { money } from '@/lib/billing';
 import { coinsText, fmtCoins } from '@/lib/coins';
 import { formatPhone } from '@/lib/phone';
+import { PhoneInput } from '@/components/ui/phone-input';
 import { daysBetween, relativeAgo } from '@/lib/periods';
 import { localDate } from '@/lib/time';
 import type { Customer } from '@/lib/types';
@@ -201,7 +202,7 @@ export function ClientFormSheet({ open, onClose, initial, onSaved }: { open: boo
 
   useEffect(() => {
     if (open) {
-      setV(initial ? { ...initial, phone: initial.phone ? formatPhone(initial.phone).replace(/^\+91 /, '') : '' } : blank());
+      setV(initial ? { ...initial, phone: initial.phone ? formatPhone(initial.phone) : '' } : blank());
       setTagDraft(''); setError(null);
     }
   }, [open, initial]);
@@ -225,10 +226,7 @@ export function ClientFormSheet({ open, onClose, initial, onSaved }: { open: boo
       <form className="stack-lg" onSubmit={(e) => { e.preventDefault(); submit(); }}>
         <div className="grid-2">
           <TextField label="Name" value={v.name} onChange={(e) => set('name', e.target.value)} autoFocus={!initial?.id} autoComplete="off" />
-          <div className="field">
-            <label htmlFor="cl-phone">Mobile number</label>
-            <div className="prefix-input"><span>+91</span><input id="cl-phone" className="input num" inputMode="tel" placeholder="98765 43210" value={v.phone} onChange={(e) => set('phone', e.target.value)} /></div>
-          </div>
+          <PhoneInput id="cl-phone" label="Mobile number" value={v.phone} onChange={(p) => set('phone', p)} />
         </div>
         <div className="grid-2">
           <SelectField label="Gender" value={v.gender ?? ''} onChange={(e) => set('gender', (e.target.value || null) as ClientFormValue['gender'])}>

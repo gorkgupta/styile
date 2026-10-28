@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { notFound, redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { normalizePhone } from '@/lib/phone';
+import { phoneFromAuth } from '@/lib/phone';
 import { BillView, type CustomerBill } from '@/components/portal/bill-view';
 import { findSiteSalon } from '@/lib/salon-site';
 import { salonSiteBase } from '@/lib/site';
@@ -69,6 +69,6 @@ export default async function Page({ params }: { params: Promise<{ slug: string;
       .map((i) => ({ id: i.id, name: i.name, qty: Number(i.qty), unit_price: Number(i.unit_price), discount: Number(i.discount), gst_rate: Number(i.gst_rate), line_total: Number(i.line_total), stylist: (i.staff_id && stylists.get(i.staff_id)) || null })),
     payments: ((pays ?? []) as { method: PayMethod; amount: number }[]).map((p) => ({ method: p.method, amount: Number(p.amount) })),
   };
-  const phone = auth.user.phone ? normalizePhone(auth.user.phone) ?? undefined : undefined;
+  const phone = phoneFromAuth(auth.user.phone) ?? undefined;
   return <BillView bill={bill} phone={phone} base={base} />;
 }

@@ -12,6 +12,7 @@ import { formatPhone, initials } from '@/lib/phone';
 import { dayKeyOf, fmtDateLong, fmtDateShort, fmtHhmm } from '@/lib/time';
 import type { Hours } from '@/lib/types';
 import { usePhoneOtp } from './phone-otp';
+import { PhoneInput } from '@/components/ui/phone-input';
 import { bookableDays, DateStrip, SlotGrid } from './date-strip';
 
 export interface PublicService { id: string; category_id: string | null; name: string; description: string | null; duration_min: number; price: number; gender: 'unisex' | 'female' | 'male' }
@@ -390,16 +391,8 @@ export function BookingFlow(p: BookingPageProps) {
               {p.me || verified ? (
                 <div className="bk-verified"><Icon name="check" size={16} />Booking with {formatPhone(p.me?.phone ?? otp.digits)}</div>
               ) : otp.stage === 'phone' ? (
-                <div className="field">
-                  <label htmlFor="bk-phone">Mobile number</label>
-                  <div className="prefix-input">
-                    <span>+91</span>
-                    <input id="bk-phone" className="input" inputMode="numeric" autoComplete="tel-national" placeholder="98765 43210" maxLength={14}
-                      value={otp.phoneInput} onChange={(e) => otp.setPhoneInput(e.target.value)} aria-invalid={!!otp.error || undefined}
-                      onKeyDown={(e) => { if (e.key === 'Enter') confirm(); }} />
-                  </div>
-                  {otp.error ? <span className="error-text" role="alert">{otp.error}</span> : <span className="hint">We’ll send a 6-digit code on WhatsApp to confirm it’s you.</span>}
-                </div>
+                <PhoneInput id="bk-phone" label="Mobile number" value={otp.phoneInput} onChange={otp.setPhoneInput} error={otp.error}
+                  hint="We’ll send a 6-digit code on WhatsApp to confirm it’s you." onKeyDown={(e) => { if (e.key === 'Enter') confirm(); }} />
               ) : (
                 <div className="field">
                   <label htmlFor="bk-code">Code sent to {formatPhone(otp.digits)}</label>

@@ -370,6 +370,40 @@ select t.ok((select count(*) from public.coin_transactions) > 0 and not exists (
 select t.ok(not exists (select 1 from public.coin_transactions where customer_id = :'sneha'), 'client cannot see other clients'' coins');
 select t.fails(format($q$select public.load_coins(%L, %L, 100)$q$, :'salon_a', :'coin_client'), 'client cannot load coins themselves');
 
+-- ===== International clients (Bhutan +975, Jaigaon border) =====
+reset role;
+-- Supabase keeps auth phones as digits without "+"; Karma signed in with +975 17 12 34 56 and entered the code.
+insert into auth.users (id, phone, phone_confirmed_at) values ('00000000-0000-0000-0000-000000000975', '97517123456', now());
+-- Started a sign-up with Karma's number but never entered the code
+insert into auth.users (id, phone) values ('00000000-0000-0000-0000-000000000976', '97517123456');
+set role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-00000000000a","role":"authenticated"}', false);
+insert into public.customers (salon_id, name, phone) values (:'salon_a', 'Karma Wangmo', '97517123456') returning id as karma_a \gset
+select t.ok((select phone from public.customers where id = :'karma_a') = '97517123456', 'front desk adds a Bhutan (+975) client');
+insert into public.customers (salon_id, name, phone) values (:'salon_a', 'Pema', '97577123456'), (:'salon_a', 'Sita', '9779841234567'), (:'salon_a', 'Rahim', '8801712345678');
+select t.ok((select count(*) from public.customers where salon_id = :'salon_a' and phone in ('97577123456', '9779841234567', '8801712345678')) = 3, 'TashiCell, Nepal and Bangladesh numbers stored as digits with country code');
+select t.fails(format($q$insert into public.customers (salon_id, name, phone) values (%L, 'Karma again', '97517123456')$q$, :'salon_a'), 'same +975 number cannot be added twice at one salon');
+select t.fails(format($q$insert into public.customers (salon_id, name, phone) values (%L, 'Plus sign', '+97517123456')$q$, :'salon_a'), 'phone stored without "+"');
+select t.fails(format($q$insert into public.customers (salon_id, name, phone) values (%L, 'National only', '17123456')$q$, :'salon_a'), 'Bhutan number without its country code rejected');
+-- She also visits the other salon (created there by the booking service, as the public booking page does)
+reset role;
+insert into public.customers (salon_id, name, phone) values (:'salon_b', 'Karma W', '97517123456') returning id as karma_b \gset
+set role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-000000000976","role":"authenticated"}', false);
+select t.ok(public.claim_customer_profiles() = 0 and (select count(*) from public.customers) = 0, 'unverified +975 sign-up cannot claim the records');
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-000000000975","role":"authenticated"}', false);
+select t.ok((select count(*) from public.customers) = 0, '+975 login sees nothing before claiming');
+select t.ok(public.claim_customer_profiles() = 2, '+975 phone login claims her records at both salons');
+select t.ok((select count(*) from public.customers) = 2 and not exists (select 1 from public.customers where phone <> '97517123456'), '+975 client sees only her own records');
+select t.ok((select count(*) from public.customers where id in (:'karma_a', :'karma_b') and user_id = '00000000-0000-0000-0000-000000000975') = 2, 'both records linked to her login');
+select t.ok(public.claim_customer_profiles() = 2, 'claiming again is harmless');
+reset role;
+update auth.users set phone = '+97577123456', phone_confirmed_at = now() where id = '00000000-0000-0000-0000-000000000976';
+set role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-000000000976","role":"authenticated"}', false);
+select public.claim_customer_profiles() as pema_claimed \gset
+select t.ok(:pema_claimed = 1 and (select name from public.customers) = 'Pema', 'auth phone with a "+" still matches the stored digits');
+
 -- ===== Anonymous =====
 reset role;
 set role anon;

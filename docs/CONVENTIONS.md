@@ -46,7 +46,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ q
 * Live in `src/actions/<area>.ts`, start with `'use server'`, export **only `async function`s** (types may be exported with `export interface/type`).
 * Signature returns `Promise<ActionResult<T>>` (`{ ok: true, data?, message? } | { ok: false, error }`). Never throw to the client: `try { … } catch (e) { return fail(e); }`.
 * Get the user's salon with `await getSalonContext()`; check permissions with `can(ctx.role, '…')` before writing (the DB enforces it too).
-* Validate input (normalise phones with `normalizePhone`, dates with `isValidDateStr`). Write user-facing error text that says what to do.
+* Validate input (normalise phones with `normalizePhone` — any country, India by default; say what's wrong with `invalidPhoneMessage` — dates with `isValidDateStr`). Clients and salons type phones in `<PhoneInput>` (`@/components/ui/phone-input`: country code select + number); never hard-code a "+91" prefix. Write user-facing error text that says what to do.
 * After writes call `revalidatePath('/app', 'layout')` (or a narrower path).
 * Use `createAdminClient()` (service role, bypasses RLS) **only** for public/WhatsApp/platform-admin paths, and only after your own checks.
 * Client components call actions directly: `const r = await saveCustomer(input); if (!r.ok) return toast(r.error, 'error');` then `router.refresh()`.
