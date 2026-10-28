@@ -166,13 +166,13 @@ export function AppointmentSheet({ appt, onClose, menu, canBill }: { appt: Appoi
         footer={!finished && (
           <>
             {appt.status === 'in_service' && canBill && (
-              <Link className="btn btn-primary" href={`/app/pos?appointment=${appt.id}`}><Icon name="receipt" />Check out</Link>
+              <Link className="btn btn-primary" href={appt.event_id ? `/app/pos?event=${appt.event_id}` : `/app/pos?appointment=${appt.id}`}><Icon name="receipt" />Check out</Link>
             )}
             {(NEXT_ACTIONS[appt.status] ?? []).map((a) => (
               <Button key={a.status} variant={a.variant} loading={pending} onClick={() => act(a.status)}>{a.label}</Button>
             ))}
             {['checked_in'].includes(appt.status) && canBill && (
-              <Link className="btn btn-secondary" href={`/app/pos?appointment=${appt.id}`}>Check out</Link>
+              <Link className="btn btn-secondary" href={appt.event_id ? `/app/pos?event=${appt.event_id}` : `/app/pos?appointment=${appt.id}`}>Check out</Link>
             )}
           </>
         )}>
@@ -182,6 +182,11 @@ export function AppointmentSheet({ appt, onClose, menu, canBill }: { appt: Appoi
             <div className="row"><span className="dot" style={{ background: stylist?.color ?? '#999', marginLeft: 4, marginRight: 4 }} /><span>{stylist?.name ?? 'Any stylist'}</span></div>
             <div className="row"><Icon name="phone" size={17} className="muted" /><a href={`tel:+${appt.customer.phone}`}>{formatPhone(appt.customer.phone)}</a>
               <a className="btn btn-ghost btn-sm" href={waLink} target="_blank" rel="noreferrer"><Icon name="whatsapp" size={16} />WhatsApp</a></div>
+            {appt.event_id && (
+              <div className="row"><Icon name="heart" size={17} className="adv-title-icon" />
+                <span>{appt.guest_name ? <strong>{appt.guest_name}</strong> : null}{appt.guest_name ? ' · ' : ''}part of an event</span>
+                <Link className="btn btn-ghost btn-sm" href={`/app/events/${appt.event_id}`}>Open event</Link></div>
+            )}
             <div className="row-wrap">
               <Badge tone="outline">{SOURCE_LABEL[appt.source]}</Badge>
               {appt.token_no && <Badge tone="marigold">Token {appt.token_no}</Badge>}

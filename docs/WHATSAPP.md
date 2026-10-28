@@ -44,6 +44,7 @@ Replies inside the 24-hour customer-service window are free-form. Outside it (re
 | `bill_receipt` | Hi {{1}}, thank you for visiting {{2}}! Your bill {{3}} for {{4}} is ready. — with a **URL button** "View bill" → `https://styile.com/b/{{1}}` (one link for every salon; it forwards to the bill on the salon's own address) |
 | `coins_update` | Hi {{1}}, {{2}} coins have been added to your balance at {{3}}. Your balance is now {{4}} coins — use them on your next bill. ({{1}} name, {{2}} coins added, {{3}} salon, {{4}} balance) |
 | `package_receipt` | Hi {{1}}, we received {{2}} for {{3}} at {{4}} (receipt {{5}}). Your sessions: {{6}}. Use them by {{7}} — just tell us on your visit. This is a receipt, not a tax invoice; GST is on each visit's bill. ({{1}} name, {{2}} amount, {{3}} package, {{4}} salon, {{5}} receipt no., {{6}} sessions, {{7}} last day) |
+| `advance_receipt` | Hi {{1}}, we received {{2}} as an advance at {{3}} for {{4}} (receipt {{5}}). It will be adjusted on your final bill. View your receipt: {{6}} ({{1}} name, {{2}} amount, {{3}} salon, {{4}} event, {{5}} receipt no., {{6}} receipt link). Sent when the desk records an advance for a bridal or event booking; inside the 24-hour window the same facts go as a normal message. |
 
 Optional: add Hindi (`hi`) versions with the same names.
 
@@ -55,6 +56,7 @@ Optional: add Hindi (`hi`) versions with the same names.
 * Answer questions about services, prices, timings and anything the salon adds under Settings → WhatsApp → "What the assistant should know".
 * Tell clients their **coin balance** at the salon and their recent coin use (`my_coins`). Coins are bought at the front desk only; the assistant can't add coins or take payments.
 * Tell clients the **sessions left in their packages**, when each package ends, and their **membership card** (discount and end date) (`my_packages`). Packages and cards are sold at the front desk only.
+* Bridal and group bookings, and their advances, are handled by the team: the assistant hands these chats over. Advance receipts are sent from the desk (`advance_receipt`).
 * Hand over to a person (complaints, refunds, bridal/group bookings, medical questions, or on request). The chat then shows **Needs reply** in the inbox and the assistant stays quiet until the team resumes it.
 
 Voice notes and images aren't understood yet; the assistant asks the client to type.

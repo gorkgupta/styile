@@ -13,6 +13,7 @@ const EMPTY: SalonReport = {
   coins_sold: 0, coins_bonus: 0, coins_redeemed: 0, coins_outstanding: 0,
   packages_sold: 0, packages_sold_amount: 0, packages_refunded: 0, package_sessions_redeemed: 0, package_redeemed_value: 0,
   package_sessions_outstanding: 0, package_outstanding_value: 0, memberships_sold: 0, memberships_amount: 0, member_discounts: 0, active_members: 0,
+  advances_received: 0, advances_applied: 0, advances_refunded: 0, advances_outstanding: 0, events_in_range: 0, events_upcoming: 0,
 };
 
 export default async function ReportsPage({ searchParams }: { searchParams: Promise<{ range?: string; from?: string; to?: string }> }) {

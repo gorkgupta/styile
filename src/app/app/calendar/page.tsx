@@ -27,6 +27,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
       appointments={appointments}
       menu={{ ...menu, staff, tz: ctx.salon.timezone, intervalMin: ctx.salon.slot_interval_min }}
       canBill={can(ctx.role, 'bill')}
+      newEvent={can(ctx.role, 'events') ? { methods: ctx.salon.payment_methods, waConnected: !!ctx.salon.wa_phone_number_id } : null}
       myStaffId={ctx.role === 'stylist' ? ctx.staffId : null}
     />
   );

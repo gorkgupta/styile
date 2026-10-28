@@ -117,6 +117,7 @@ export function ReportsScreen({ report, previous, range, today, salonName, gstMo
                 {expenses && <ExpensesReportPanel report={report} expenses={expenses} range={range} />}
                 <CoinsReportPanel report={report} />
                 <PackagesReportPanel report={report} />
+                <AdvancesReportPanel report={report} />
               </div>
             </div>
 
@@ -377,9 +378,9 @@ function SourcesPanel({ bySource }: { bySource: Partial<Record<BookingSource, nu
   );
 }
 
-const METHOD_ORDER: PayMethod[] = ['upi', 'upi_bhutan', 'card', 'cash', 'cash_nu', 'wallet', 'package', 'other'];
+const METHOD_ORDER: PayMethod[] = ['upi', 'upi_bhutan', 'card', 'cash', 'cash_nu', 'wallet', 'package', 'advance', 'other'];
 const METHOD_COLOR: Record<PayMethod, string> = {
-  upi: '#0F6E73', upi_bhutan: '#4FA89B', card: '#7A3FB8', cash: '#C2541B', cash_nu: '#9A6B00', wallet: '#2F6DB5', package: '#B43D6B', other: '#7A7486',
+  upi: '#0F6E73', upi_bhutan: '#4FA89B', card: '#7A3FB8', cash: '#C2541B', cash_nu: '#9A6B00', wallet: '#2F6DB5', package: '#B43D6B', advance: '#9A5F0B', other: '#7A7486',
 };
 
 function MethodsPanel({ byMethod }: { byMethod: Partial<Record<PayMethod, number>> }) {
@@ -446,6 +447,26 @@ function PackagesReportPanel({ report }: { report: SalonReport }) {
         <p className="tiny muted">
           Package sales are advances, not revenue — bills paid from packages already count in revenue and GST. Member discounts given: <span className="num">{money(Math.round(memberDisc))}</span>.
         </p>
+      </div>
+    </Panel>
+  );
+}
+
+function AdvancesReportPanel({ report }: { report: SalonReport }) {
+  const got = n(report.advances_received), used = n(report.advances_applied), back = n(report.advances_refunded), held = n(report.advances_outstanding);
+  const evs = n(report.events_in_range), upcoming = n(report.events_upcoming);
+  if (!got && !used && !back && !held && !evs && !upcoming) return null;
+  return (
+    <Panel title={<h2 className="row" style={{ gap: 8 }}><Icon name="heart" size={18} className="adv-title-icon" />Bridal & events</h2>}
+      actions={<Link className="btn btn-ghost btn-sm" href="/app/events">Events</Link>}>
+      <div className="stack">
+        <div className="coin-report">
+          <div><div className="small muted">Advances taken</div><div className="coin-report-value num">{money(Math.round(got))}</div><div className="tiny muted">{back ? `${money(Math.round(back))} handed back` : 'In this period'}</div></div>
+          <div><div className="small muted">Used on bills</div><div className="coin-report-value num">{money(Math.round(used))}</div><div className="tiny muted">Bills in this period</div></div>
+          <div><div className="small muted">Advances held</div><div className="coin-report-value num">{money(Math.round(held))}</div><div className="tiny muted">Owed to clients now</div></div>
+          <div><div className="small muted">Events</div><div className="coin-report-value num">{evs}</div><div className="tiny muted">{upcoming} coming up</div></div>
+        </div>
+        <p className="tiny muted">Advances are money received, not revenue — they count in revenue when the final bill is made.</p>
       </div>
     </Panel>
   );

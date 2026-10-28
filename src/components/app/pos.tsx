@@ -46,13 +46,19 @@ export interface PosProps {
   /** Set when checking out an appointment (?appointment=) or billing a known client (?customer=). */
   prefill?: {
     appointmentId: string | null; customer: ClientLite | null; lines: PosPrefillLine[]; context?: string;
+    /** Checking out a bridal / group event (its advances are applied by default). */
+    eventId?: string | null;
     /** The client's packages with sessions left and their membership card (loaded with the page). */
     benefits?: Benefits | null;
   } | null;
 }
 
 /** What the client can use on this bill: package sessions and their member discount. */
-export interface Benefits { packages: ClientPackage[]; membership: ClientMembership | null }
+export interface Benefits {
+  packages: ClientPackage[]; membership: ClientMembership | null;
+  /** Advances paid earlier (bridal / event bookings) still to be used. */
+  advance?: { left: number; receipts: string[] };
+}
 
 interface Line {
   key: string; kind: 'service' | 'product' | 'custom'; serviceId: string | null; staffId: string;
@@ -159,15 +165,20 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
   ), [lines, salon.gstMode, salon.pricesIncludeTax, salon.serviceRate, membership]);
   // Package sessions are paid from the package; the client pays the rest now.
   const fromPackages = bill.packageTotal;
+  // Advances paid earlier: on by default when checking out an event.
+  const advanceAvail = benefits?.advance?.left ?? 0;
+  const [useAdvance, setUseAdvance] = useState(!!prefill?.eventId);
+  const advanceUsed = useAdvance ? Math.round(Math.min(advanceAvail, Math.max(0, bill.total - fromPackages)) * 100) / 100 : 0;
+  const prepaid = fromPackages + advanceUsed;
   const packagesUsed = [...new Set(lines.filter((l) => l.packageId).map((l) => benefits?.packages.find((p) => p.id === l.packageId)?.name).filter(Boolean))];
 
   const fixedSum = pays.filter((p) => !p.auto).reduce((s, p) => s + parseAmount(p.amount), 0);
-  const remainder = Math.max(0, Math.round((bill.total - fromPackages - fixedSum) * 100) / 100);
+  const remainder = Math.max(0, Math.round((bill.total - prepaid - fixedSum) * 100) / 100);
   // A Coins row that fills the rest never takes more than the client has.
   const fixedCoins = pays.filter((p) => !p.auto && p.method === 'wallet').reduce((s, p) => s + parseAmount(p.amount), 0);
   const autoAmount = (p: PayRow) => (p.method === 'wallet' ? usableCoins(coinBalance - fixedCoins, remainder) : remainder);
   const payRows = pays.map((p) => (p.auto ? { ...p, amount: autoAmount(p) ? String(autoAmount(p)) : '' } : p));
-  const paid = Math.round((fromPackages + payRows.reduce((s, p) => s + parseAmount(p.amount), 0)) * 100) / 100;
+  const paid = Math.round((prepaid + payRows.reduce((s, p) => s + parseAmount(p.amount), 0)) * 100) / 100;
   const balance = Math.round((bill.total - paid) * 100) / 100;
   const coinsUsed = Math.round(payRows.filter((p) => p.method === 'wallet').reduce((s, p) => s + parseAmount(p.amount), 0) * 100) / 100;
   const coinsShort = coinsUsed > coinBalance + 0.001;
@@ -244,8 +255,8 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
     const others = rows.filter((p) => p.method !== 'wallet');
     const keyOfRest = others.find((p) => p.auto)?.key ?? others[0]?.key;
     const fixedOthers = others.filter((p) => p.key !== keyOfRest).reduce((s, p) => s + parseAmount(p.amount), 0);
-    const amount = usableCoins(coinBalance, bill.total - fromPackages - fixedOthers);
-    const rest = Math.round((bill.total - fromPackages - fixedOthers - amount) * 100) / 100;
+    const amount = usableCoins(coinBalance, bill.total - prepaid - fixedOthers);
+    const rest = Math.round((bill.total - prepaid - fixedOthers - amount) * 100) / 100;
     const coinRow: PayRow = { key: nextKey(), method: 'wallet', amount: String(amount), reference: '', auto: false };
     // Coins cover the whole bill: the row that would take the rest is no longer needed.
     const kept = others.map((p) => ({ ...p, auto: p.key === keyOfRest })).filter((p) => !(p.key === keyOfRest && rest <= 0));
@@ -266,12 +277,16 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
     const r = await createInvoice({
       customerId: client?.id ?? null,
       appointmentId: prefill?.appointmentId ?? null,
+      eventId: prefill?.eventId ?? null,
       items: lines.map((l) => ({
         kind: l.kind, serviceId: l.serviceId, staffId: l.staffId || null, name: l.name,
         qty: l.qty, unitPrice: l.unitPrice, discount: l.packageId ? 0 : parseAmount(l.discount), gstRate: l.gstRate, code: l.code || null,
         clientPackageId: l.packageId,
       })),
-      payments: payRows.filter((p) => parseAmount(p.amount) > 0).map((p) => ({ method: p.method, amount: parseAmount(p.amount), reference: p.reference })),
+      payments: [
+        ...(advanceUsed > 0 ? [{ method: 'advance' as const, amount: advanceUsed }] : []),
+        ...payRows.filter((p) => parseAmount(p.amount) > 0).map((p) => ({ method: p.method, amount: parseAmount(p.amount), reference: p.reference })),
+      ],
       notes,
       sendOnWhatsApp: sendWa && !!client,
       clientGstin: regular && b2bOpen ? gstinClean || null : null,
@@ -292,9 +307,9 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
 
   return (
     <>
-      <Topbar title="New bill" back={prefill?.appointmentId ? '/app' : undefined}
+      <Topbar title="New bill" back={prefill?.eventId ? `/app/events/${prefill.eventId}` : prefill?.appointmentId ? '/app' : undefined}
         subtitle={prefill?.context ?? `Next bill no. ${salon.nextInvoiceNo}`}
-        actions={lines.length > 0 && !prefill?.appointmentId
+        actions={lines.length > 0 && !prefill?.appointmentId && !prefill?.eventId
           ? <Button variant="ghost" size="sm" onClick={() => { setLines([]); setPays([freshPay(defaultMethod)]); }}>Clear</Button>
           : undefined} />
       <div className="page">
@@ -533,6 +548,16 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
                     </div>
                   </div>
                 )}
+                {client && advanceAvail > 0 && (
+                  <div className="adv-strip">
+                    <span className="adv-badge" aria-hidden><Icon name="heart" size={18} /></span>
+                    <div className="grow" style={{ minWidth: 0 }}>
+                      <div className="strong num">Advance paid earlier: {money(advanceAvail)}</div>
+                      <div className="tiny muted truncate">{useAdvance && advanceUsed > 0 ? `${money(advanceUsed)} on this bill` : 'Not used on this bill'} · {benefits?.advance?.receipts.join(', ')}</div>
+                    </div>
+                    <Switch checked={useAdvance} onChange={setUseAdvance} label={<span className="sr-only">Use the advance on this bill</span>} />
+                  </div>
+                )}
                 {client && coinBalance > 0 && (
                   <div className="coin-strip">
                     <span className="coin-badge" aria-hidden><Icon name="coins" size={18} /></span>
@@ -542,7 +567,7 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
                         {coinsUsed > 0 ? `${fmtCoins(coinsUsed)} on this bill · ${fmtCoins(Math.max(coinBalance - coinsUsed, 0))} left after` : `${client.name.split(' ')[0]}’s balance · 1 coin = ₹1`}
                       </div>
                     </div>
-                    {lines.length > 0 && bill.total - fromPackages > 0 && (coinsUsed === 0 || (coinsUsed < Math.min(coinBalance, bill.total - fromPackages) && balance > 0)) && (
+                    {lines.length > 0 && bill.total - prepaid > 0 && (coinsUsed === 0 || (coinsUsed < Math.min(coinBalance, bill.total - prepaid) && balance > 0)) && (
                       <Button size="sm" icon="coins" onClick={useCoins}>Use coins</Button>
                     )}
                   </div>

@@ -52,6 +52,7 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
       teamSize={setup.count ?? 0}
       menu={{ ...menu, staff, tz, intervalMin: ctx.salon.slot_interval_min }}
       canBill={billing}
+      newEvent={can(ctx.role, 'events') ? { methods: ctx.salon.payment_methods, waConnected: !!ctx.salon.wa_phone_number_id } : null}
       isOwner={ctx.role === 'owner'}
       welcome={sp.welcome === '1'}
       denied={sp.denied === '1'}

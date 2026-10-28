@@ -12,6 +12,8 @@ const RULES = {
   adjustCoins: ['owner'],
   sellPackages: ['owner', 'manager', 'receptionist'],   // packages and membership cards, at the desk
   cancelPackages: ['owner', 'manager'],
+  events: ['owner', 'manager', 'receptionist'],        // bridal & group bookings and their advances
+  refundAdvances: ['owner', 'manager'],
   viewClients: ['owner', 'manager', 'receptionist', 'stylist'],
   deleteClients: ['owner', 'manager'],
   manageMenu: ['owner', 'manager'],

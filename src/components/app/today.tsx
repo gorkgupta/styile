@@ -5,11 +5,12 @@ import { Avatar, Badge, Button, Empty, Notice, Panel, Stat, StatusBadge, useToas
 import { Icon } from '@/components/ui/icons';
 import { Topbar } from './shell';
 import { AppointmentSheet, NewAppointmentSheet, type MenuProps } from './appointment-sheets';
+import { NewEventSheet } from './events';
 import { useLiveRefresh } from './live';
 import { money } from '@/lib/billing';
 import { rootDomain, salonUrl } from '@/lib/tenant';
 import { fmtDateLong, fmtDateShort, fmtTime } from '@/lib/time';
-import type { AppointmentFull } from '@/lib/types';
+import type { AppointmentFull, PayMethod } from '@/lib/types';
 
 export interface TodayProps {
   salon: { id: string; name: string; slug: string; waConnected: boolean; gstin: string | null; gstMode?: 'unregistered' | 'composition' | 'regular' };
@@ -27,6 +28,8 @@ export interface TodayProps {
   denied?: boolean;
   /** Yesterday had payments but wasn't closed (shown to roles that can close the day). */
   unclosedDay?: string | null;
+  /** Front desk and above can book bridal / group events from here. */
+  newEvent?: { methods?: PayMethod[]; waConnected: boolean } | null;
 }
 
 function greeting(nowIso: string, tz: string) {
@@ -37,6 +40,7 @@ function greeting(nowIso: string, tz: string) {
 export function TodayView(p: TodayProps) {
   useLiveRefresh(p.salon.id, ['appointments']);
   const [newOpen, setNewOpen] = useState<'appointment' | 'walkin' | null>(null);
+  const [eventOpen, setEventOpen] = useState(false);
   const [selected, setSelected] = useState<AppointmentFull | null>(null);
   const toast = useToast();
   const now = new Date(p.nowIso).getTime();
@@ -69,6 +73,7 @@ export function TodayView(p: TodayProps) {
         title={`${greeting(p.nowIso, tz)}, ${p.userName}`}
         subtitle={fmtDateLong(p.today)}
         actions={<>
+          {p.newEvent && <Button icon="heart" className="hide-mobile" onClick={() => setEventOpen(true)}>New event</Button>}
           <Button icon="walkin" onClick={() => setNewOpen('walkin')}><span className="hide-mobile">Walk-in</span></Button>
           <Button variant="primary" icon="plus" onClick={() => setNewOpen('appointment')}><span className="hide-mobile">New appointment</span></Button>
         </>}
@@ -174,6 +179,7 @@ export function TodayView(p: TodayProps) {
         </div>
       </div>
       <NewAppointmentSheet open={!!newOpen} mode={newOpen ?? 'appointment'} onClose={() => setNewOpen(null)} menu={p.menu} date={p.today} />
+      {p.newEvent && <NewEventSheet open={eventOpen} onClose={() => setEventOpen(false)} menu={p.menu} today={p.today} methods={p.newEvent.methods} waConnected={p.newEvent.waConnected} />}
       <AppointmentSheet appt={selected} onClose={() => setSelected(null)} menu={p.menu} canBill={p.canBill} />
     </>
   );

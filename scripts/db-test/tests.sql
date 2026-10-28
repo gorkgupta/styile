@@ -963,6 +963,165 @@ select t.ok((select count(*) from public.client_packages) = 1 and (select count(
 select t.fails(format($q$select public.sell_package(%L, %L, %L, 'cash')$q$, :'salon_p', :'deki', :'pk6'), 'client can''t sell herself a package');
 reset role;
 
+-- ===== Bridal and event bookings with advances (0013 + 0014) =====
+-- Sonam Glow Parlour (regular GST) books Deki's wedding: bride and mother at home, a trial first, advances in UPI and Nu.
+reset role;
+select id as sonam_staff from public.staff where salon_id = :'salon_p' and user_id = '00000000-0000-0000-0000-0000000000e1' \gset
+insert into public.services (salon_id, name, duration_min, price, sac_code) values (:'salon_p', 'Bridal make-up', 120, 6000, '999722') returning id as p_bridal \gset
+insert into public.services (salon_id, name, duration_min, price, sac_code) values (:'salon_p', 'Party make-up', 60, 2500, '999722') returning id as p_party \gset
+select public.salon_today(:'salon_p') + 20 as wed, public.salon_today(:'salon_p') + 5 as trial_day \gset
+set role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000e2","role":"authenticated"}', false);
+select public.day_summary(:'salon_p', public.salon_today(:'salon_p')) as a0 \gset
+
+select * from public.create_event(:'salon_p', jsonb_build_object(
+  'customer_id', :'deki', 'event_type', 'bridal', 'title', 'Deki''s wedding', 'event_at', t.at(:'wed', '06:00'),
+  'location', 'home', 'address', 'Ward 4, near Bhutan Gate, Jaigaon', 'travel_charge', 500, 'quoted_price', 9000, 'notes', 'Gold and red theme',
+  'people', jsonb_build_array(
+    jsonb_build_object('name', 'Bride', 'service_ids', jsonb_build_array(:'p_bridal'), 'staff_id', :'tenzin', 'start_at', t.at(:'wed', '03:00')),
+    jsonb_build_object('name', 'Mother', 'service_ids', jsonb_build_array(:'p_party'), 'staff_id', :'sonam_staff', 'start_at', t.at(:'wed', '04:00'))),
+  'trial', jsonb_build_object('start_at', t.at(:'trial_day', '11:00'), 'staff_id', :'tenzin', 'service_ids', jsonb_build_array(:'p_bridal')),
+  'advance', jsonb_build_object('amount', 3000, 'method', 'upi', 'reference', 'UPI 8812'))) \gset ev_
+select t.ok(:'ev_status' = 'booked' and :ev_people = 2 and :'ev_location' = 'home' and :ev_travel_charge = 500 and :ev_quoted_price = 9000,
+  'front desk books a bridal event: home visit, ₹500 travel, ₹9,000 quote, 2 people');
+select t.ok((select count(*) = 2 and bool_and(status = 'booked') and string_agg(guest_name, ',' order by start_at) = 'Bride,Mother'
+             from public.appointments where event_id = :'ev_id'), 'each person is an appointment on the calendar (Bride with Tenzin, Mother with Sonam)');
+select t.ok((select guest_name = 'Trial' and event_id is null and start_at = t.at(:'trial_day', '11:00') from public.appointments where id = :'ev_trial_appointment_id'),
+  'the trial is its own appointment, linked from the event');
+select t.ok((select receipt_no = 'AR-00001' and amount = 3000 and method = 'upi' and event_id = :'ev_id' and received_by = '00000000-0000-0000-0000-0000000000e2'
+             from public.advance_payments where customer_id = :'deki'), 'advance recorded with receipt AR-00001 and who took it');
+select t.ok(not exists (select 1 from public.invoices where event_id = :'ev_id'), 'an advance is a receipt, not a bill');
+select t.ok(t.err(format($q$select public.create_event(%L, jsonb_build_object('customer_id', %L, 'event_type', 'party', 'title', 'Clash', 'event_at', %L,
+    'people', jsonb_build_array(jsonb_build_object('name', 'Guest', 'service_ids', jsonb_build_array(%L), 'staff_id', %L, 'start_at', %L))))$q$,
+    :'salon_p', :'sita', t.at(:'wed', '06:00'), :'p_party', :'tenzin', t.at(:'wed', '03:30'))) = 'Tenzin is already booked then (for Guest). Pick another time or stylist.',
+  'a stylist can''t be double-booked for an event');
+select t.ok((select count(*) from public.events where salon_id = :'salon_p') = 1, 'a failed event booking leaves nothing behind');
+select t.fails(format($q$select public.create_event(%L, jsonb_build_object('customer_id', %L, 'title', 'At home', 'event_at', %L, 'location', 'home',
+    'people', jsonb_build_array(jsonb_build_object('service_ids', jsonb_build_array(%L)))))$q$, :'salon_p', :'sita', t.at(:'wed', '10:00'), :'p_party'), 'a home visit needs an address');
+select t.fails(format($q$select public.create_event(%L, jsonb_build_object('customer_id', %L, 'title', 'Empty', 'event_at', %L, 'people', '[]'::jsonb))$q$, :'salon_p', :'sita', t.at(:'wed', '10:00')), 'an event needs at least one person');
+select t.fails(format($q$select public.create_event(%L, jsonb_build_object('customer_id', %L, 'title', 'Theirs', 'event_at', %L,
+    'people', jsonb_build_array(jsonb_build_object('service_ids', jsonb_build_array(%L)))))$q$, :'salon_p', :'sita', t.at(:'wed', '10:00'), :'haircut'), 'an event can''t use another salon''s service');
+select t.fails(format($q$select public.create_event(%L, jsonb_build_object('customer_id', %L, 'title', 'Not ours', 'event_at', %L,
+    'people', jsonb_build_array(jsonb_build_object('service_ids', jsonb_build_array(%L)))))$q$, :'salon_p', :'kabir', t.at(:'wed', '10:00'), :'p_party'), 'an event can''t be for another salon''s client');
+select t.fails(format($q$select public.create_event(%L, jsonb_build_object('customer_id', %L, 'title', 'Late trial', 'event_at', %L,
+    'people', jsonb_build_array(jsonb_build_object('service_ids', jsonb_build_array(%L))), 'trial', jsonb_build_object('start_at', %L, 'service_ids', jsonb_build_array(%L))))$q$,
+    :'salon_p', :'sita', t.at(:'wed', '10:00'), :'p_party', t.at(:'wed', '12:00'), :'p_party'), 'the trial must be before the event');
+
+-- More advances
+select (public.record_advance(:'salon_p', :'deki', :'ev_id', 2000, 'cash_nu', null, 'Nu notes')).receipt_no as ar2 \gset
+select t.ok(:'ar2' = 'AR-00002', 'second advance in Ngultrum cash: AR-00002');
+select t.ok(t.err(format($q$select public.record_advance(%L, %L, %L, 500, 'cash')$q$, :'salon_p', :'sita', :'ev_id')) = 'That event is for another client', 'an advance goes to the event''s own client');
+select t.fails(format($q$select public.record_advance(%L, %L, %L, 500, 'wallet')$q$, :'salon_p', :'deki', :'ev_id'), 'coins can''t pay an advance');
+select t.fails(format($q$select public.record_advance(%L, %L, %L, 0, 'cash')$q$, :'salon_p', :'deki', :'ev_id'), 'an advance must be more than zero');
+select t.fails(format($q$insert into public.advance_payments (salon_id, customer_id, receipt_no, amount, method) values (%L, %L, 'AR-99999', 100000, 'cash')$q$, :'salon_p', :'deki'), 'advances can''t be inserted directly');
+update public.advance_payments set applied_amount = 0, amount = 1 where customer_id = :'deki';
+select t.ok((select sum(amount) from public.advance_payments where customer_id = :'deki') = 5000, 'advances can''t be edited directly');
+update public.events set notes = 'Gold and red theme; extra hair pins' where id = :'ev_id';
+select t.ok((select notes from public.events where id = :'ev_id') like '%hair pins', 'front desk can edit event notes');
+select t.fails(format($q$update public.events set status = 'cancelled' where id = %L$q$, :'ev_id'), 'event status changes only through cancel or checkout');
+select t.fails(format($q$update public.events set customer_id = %L where id = %L$q$, :'sita', :'ev_id'), 'who the event is for can''t be changed');
+
+-- Day close: advances are money received today, by method
+select public.day_summary(:'salon_p', public.salon_today(:'salon_p')) as a1 \gset
+select t.ok((:'a1'::jsonb #>> '{totals,advances_received}')::numeric = 5000 and (:'a1'::jsonb #>> '{totals,advances_received_count}')::int = 2
+  and (:'a1'::jsonb #>> '{by_method,upi,advances}')::numeric = 3000 and (:'a1'::jsonb #>> '{by_method,cash_nu,advances}')::numeric = 2000,
+  'day close: ₹5,000 of advances received today, by method');
+select t.ok((:'a1'::jsonb #>> '{totals,collected}')::numeric - (:'a0'::jsonb #>> '{totals,collected}')::numeric = 5000
+  and (:'a1'::jsonb #>> '{totals,expected_cash_nu}')::numeric - (:'a0'::jsonb #>> '{totals,expected_cash_nu}')::numeric = 2000,
+  'advances add to money collected, and Nu advances to the Nu drawer');
+
+-- Checkout: everyone's services and the travel charge, advances applied
+select t.ok(t.err(format($q$select public.create_invoice(%L, jsonb_build_object('customer_id', %L, 'items', '[{"kind":"custom","name":"x","qty":1,"unit_price":8000}]'::jsonb, 'payments', '[{"method":"advance","amount":6000}]'::jsonb))$q$, :'salon_p', :'deki'))
+  = 'Only ₹5,000 advance left for this client', 'can''t apply more advance than is left');
+select t.fails(format($q$select public.create_invoice(%L, jsonb_build_object('customer_id', %L, 'items', '[{"kind":"custom","name":"x","qty":1,"unit_price":800}]'::jsonb, 'payments', '[{"method":"advance","amount":500}]'::jsonb))$q$, :'salon_p', :'sita'), 'can''t use another client''s advance');
+select id as ar2_id from public.advance_payments where receipt_no = 'AR-00002' and salon_id = :'salon_p' \gset
+select t.ok(t.err(format($q$select public.create_invoice(%L, jsonb_build_object('customer_id', %L, 'items', '[{"kind":"custom","name":"x","qty":1,"unit_price":800}]'::jsonb, 'payments', jsonb_build_array(jsonb_build_object('method','advance','amount',500,'advance_id',%L))))$q$, :'salon_p', :'sita', :'ar2_id'))
+  = 'That advance belongs to another client', 'a named advance must be the bill''s client''s');
+select t.fails(format($q$select public.create_invoice(%L, jsonb_build_object('customer_id', %L, 'event_id', %L, 'items', '[{"kind":"custom","name":"x","qty":1,"unit_price":800}]'::jsonb))$q$, :'salon_p', :'sita', :'ev_id'), 'an event is billed to its own client');
+select * from public.create_invoice(:'salon_p', jsonb_build_object('customer_id', :'deki', 'event_id', :'ev_id', 'items', jsonb_build_array(
+  jsonb_build_object('kind','service','service_id',:'p_bridal','staff_id',:'tenzin','name','Bridal make-up · Bride','qty',1,'unit_price',6000),
+  jsonb_build_object('kind','service','service_id',:'p_party','staff_id',:'sonam_staff','name','Party make-up · Mother','qty',1,'unit_price',2500,'discount',500),
+  jsonb_build_object('kind','custom','name','Home visit travel','qty',1,'unit_price',500)),
+  'payments', '[{"method":"advance","amount":5000},{"method":"upi","amount":3500,"reference":"UPI 9033"}]'::jsonb)) \gset eb_
+select t.ok(:eb_total = 8500 and :'eb_status' = 'paid' and :'eb_bill_type' = 'tax_invoice', 'event bill: ₹8,500 tax invoice for both people and the travel charge');
+select t.ok((select string_agg(amount::int || ':' || reference, ',' order by amount desc) from public.payments where invoice_id = :'eb_id' and method = 'advance') = '3000:Advance AR-00001,2000:Advance AR-00002',
+  'advances applied oldest first, one payment per advance');
+select t.ok((select sum(applied_amount) from public.advance_payments where customer_id = :'deki') = 5000, 'both advances fully used');
+select t.ok((select status from public.events where id = :'ev_id') = 'done'
+  and (select bool_and(status = 'completed' and invoice_id = :'eb_id') from public.appointments where event_id = :'ev_id'), 'checkout completes every person''s appointment on the one bill');
+select t.ok((select status from public.appointments where id = :'ev_trial_appointment_id') = 'booked', 'the trial stays a separate visit');
+select t.fails(format($q$select public.create_invoice(%L, jsonb_build_object('customer_id', %L, 'event_id', %L, 'items', '[{"kind":"custom","name":"x","qty":1,"unit_price":100}]'::jsonb))$q$, :'salon_p', :'deki', :'ev_id'), 'an event can''t be billed twice');
+select t.fails(format($q$select public.record_advance(%L, %L, %L, 500, 'cash')$q$, :'salon_p', :'deki', :'ev_id'), 'no new advance on a billed event');
+select public.day_summary(:'salon_p', public.salon_today(:'salon_p')) as a2 \gset
+select t.ok((:'a2'::jsonb #>> '{totals,advance_used}')::numeric = 5000 and (:'a2'::jsonb #>> '{by_method,advance,bills}')::numeric = 5000
+  and (:'a2'::jsonb #>> '{totals,collected}')::numeric - (:'a1'::jsonb #>> '{totals,collected}')::numeric = 3500,
+  'day close: the ₹5,000 advance on the bill is not counted again, only the ₹3,500 UPI');
+
+-- Cancelling the bill gives the advances back; a refund; using what is left
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000e1","role":"authenticated"}', false);
+select public.void_invoice(:'eb_id', 'Wrong stylist on the bill') \gset
+select t.ok((select sum(applied_amount) from public.advance_payments where customer_id = :'deki') = 0 and (select status from public.events where id = :'ev_id') = 'booked',
+  'cancelling the event bill frees the advances and opens the event again');
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000e2","role":"authenticated"}', false);
+select t.fails(format($q$select public.refund_advance(%L, 500, 'cash', 'Changed plans')$q$, :'ar2_id'), 'front desk can''t refund an advance');
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000e1","role":"authenticated"}', false);
+select t.fails(format($q$select public.refund_advance(%L, 2500, 'cash_nu', 'Mother not coming')$q$, :'ar2_id'), 'can''t refund more than is left of an advance');
+select t.fails(format($q$select public.refund_advance(%L, 500, 'cash_nu', ' ')$q$, :'ar2_id'), 'a refund needs a reason');
+select (public.refund_advance(:'ar2_id', 1500, 'cash_nu', 'Mother not coming; policy: refundable up to 7 days before')).refund_amount as rf \gset
+select t.ok(:rf = 1500 and (select refunded_by = '00000000-0000-0000-0000-0000000000e1' from public.advance_payments where id = :'ar2_id'), 'owner refunds Nu 1,500 of an advance');
+select t.fails(format($q$select public.refund_advance(%L, 100, 'cash_nu', 'again')$q$, :'ar2_id'), 'an advance is refunded once');
+select * from public.create_invoice(:'salon_p', jsonb_build_object('customer_id', :'deki', 'event_id', :'ev_id', 'items', jsonb_build_array(
+  jsonb_build_object('kind','service','service_id',:'p_bridal','staff_id',:'tenzin','name','Bridal make-up · Bride','qty',1,'unit_price',6000),
+  jsonb_build_object('kind','custom','name','Home visit travel','qty',1,'unit_price',500)),
+  'payments', '[{"method":"advance","amount":3500},{"method":"cash","amount":3000}]'::jsonb)) \gset eb2_
+select t.ok(:eb2_total = 6500 and :'eb2_status' = 'paid' and (select sum(amount) from public.payments where invoice_id = :'eb2_id' and method = 'advance') = 3500,
+  'billed again: ₹3,500 advance left after the refund is applied');
+select (public.create_invoice(:'salon_p', jsonb_build_object('customer_id', :'deki', 'items', '[{"kind":"custom","name":"Hair pins","qty":1,"unit_price":200}]'::jsonb))).id as pins \gset
+select t.ok(t.err(format($q$select public.add_payment(%L, 'advance', 100)$q$, :'pins')) = 'This client has no advance left to use', 'nothing more to take from the advances');
+select t.ok((select bool_and(amount - applied_amount - coalesce(refund_amount, 0) = 0) from public.advance_payments where customer_id = :'deki'), 'every rupee of advance is either used or handed back');
+select public.day_summary(:'salon_p', public.salon_today(:'salon_p')) as a3 \gset
+select t.ok((:'a3'::jsonb #>> '{totals,advance_refunds}')::numeric = 1500 and (:'a3'::jsonb #>> '{by_method,cash_nu,refunds}')::numeric
+             - (:'a2'::jsonb #>> '{by_method,cash_nu,refunds}')::numeric = 1500
+  and (:'a3'::jsonb #>> '{totals,expected_cash_nu}')::numeric - (:'a2'::jsonb #>> '{totals,expected_cash_nu}')::numeric = -1500,
+  'day close: Nu 1,500 handed back comes out of the Nu drawer');
+select public.salon_report(:'salon_p', public.salon_today(:'salon_p'), public.salon_today(:'salon_p') + 30) as ar \gset
+select t.ok((:'ar'::jsonb ->> 'advances_received')::numeric = 5000 and (:'ar'::jsonb ->> 'advances_applied')::numeric = 3500
+  and (:'ar'::jsonb ->> 'advances_refunded')::numeric = 1500 and (:'ar'::jsonb ->> 'advances_outstanding')::numeric = 0
+  and (:'ar'::jsonb ->> 'events_in_range')::int = 1 and (:'ar'::jsonb -> 'by_method' ->> 'advance')::numeric = 3500, 'report: advances received, used, refunded, held; events');
+
+-- Cancelling an event: appointments freed, advances kept until refunded
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000e2","role":"authenticated"}', false);
+select * from public.create_event(:'salon_p', jsonb_build_object('customer_id', :'sita', 'event_type', 'engagement', 'title', 'Sita''s engagement', 'event_at', t.at(:'wed', '17:00'),
+  'people', jsonb_build_array(jsonb_build_object('name', 'Sita', 'service_ids', jsonb_build_array(:'p_party'), 'staff_id', :'tenzin', 'start_at', t.at(:'wed', '15:00'))),
+  'advance', jsonb_build_object('amount', 1000, 'method', 'cash'))) \gset ev2_
+select t.fails(format($q$select public.cancel_event(%L, '')$q$, :'ev2_id'), 'cancelling an event needs a reason');
+select (public.cancel_event(:'ev2_id', 'Date moved to next year')).status as ev2_status \gset
+select t.ok(:'ev2_status' = 'cancelled' and (select bool_and(status = 'cancelled') from public.appointments where event_id = :'ev2_id')
+  and (select amount - applied_amount - coalesce(refund_amount, 0) from public.advance_payments where event_id = :'ev2_id') = 1000,
+  'cancelled event frees the stylist; the ₹1,000 advance is kept (no automatic forfeit)');
+select t.fails(format($q$select public.cancel_event(%L, 'oops')$q$, :'ev_id'), 'a billed event can''t be cancelled');
+
+-- Stylist: sees events on the calendar, not the money
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000e3","role":"authenticated"}', false);
+select t.ok((select count(*) from public.events where salon_id = :'salon_p') = 2 and (select count(*) from public.advance_payments) = 0, 'stylist sees events but not advances');
+select t.fails(format($q$select public.record_advance(%L, %L, null, 500, 'cash')$q$, :'salon_p', :'sita'), 'stylist can''t take an advance');
+select t.fails(format($q$select public.create_event(%L, jsonb_build_object('customer_id', %L, 'title', 'Mine', 'event_at', %L, 'people', jsonb_build_array(jsonb_build_object('service_ids', jsonb_build_array(%L)))))$q$, :'salon_p', :'sita', t.at(:'wed', '19:00'), :'p_party'), 'stylist can''t book events with advances');
+
+-- Another salon
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-00000000000b","role":"authenticated"}', false);
+select t.ok((select count(*) from public.events) = 0 and (select count(*) from public.advance_payments) = 0, 'other salon can''t see events or advances');
+select t.fails(format($q$select public.record_advance(%L, %L, null, 500, 'cash')$q$, :'salon_p', :'deki'), 'other salon can''t take advances here');
+select t.fails(format($q$select public.record_advance(%L, %L, %L, 500, 'cash')$q$, :'salon_b', :'kabir', :'ev2_id'), 'other salon can''t attach an advance to this salon''s event');
+select t.fails(format($q$select public.refund_advance(%L, 100, 'cash', 'x')$q$, :'ar2_id'), 'other salon can''t refund');
+select t.fails(format($q$select public.create_invoice(%L, jsonb_build_object('customer_id', %L, 'items', '[{"kind":"custom","name":"x","qty":1,"unit_price":100}]'::jsonb, 'payments', '[{"method":"advance","amount":100}]'::jsonb))$q$, :'salon_b', :'kabir'), 'no advances to use at another salon');
+
+-- The client
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000e4","role":"authenticated"}', false);
+select t.ok((select count(*) from public.events) = 1 and (select count(*) from public.advance_payments) = 2 and not exists (select 1 from public.advance_payments where customer_id <> :'deki'),
+  'client sees her own event and advances only');
+select t.fails(format($q$select public.record_advance(%L, %L, %L, 500, 'cash')$q$, :'salon_p', :'deki', :'ev_id'), 'client can''t record an advance');
+reset role;
+
 -- ===== Anonymous =====
 reset role;
 set role anon;

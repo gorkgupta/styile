@@ -7,8 +7,9 @@ import { notifyInvoice } from '@/lib/whatsapp/outbox';
 import { BUSINESS_GSTIN_RE, cleanGstin, GST_SLABS, HSN_RE } from '@/lib/gst';
 import { ALL_PAY_METHODS, type ActionResult, type PayMethod } from '@/lib/types';
 
-// Any payment type is accepted here (the salon's Settings only decide which ones the desk sees).
-const METHODS: PayMethod[] = ALL_PAY_METHODS;
+// Any payment type is accepted here (the salon's Settings only decide which ones the desk sees), plus advances
+// paid earlier (taken from the client's advances by the database). Package sessions are added by the database.
+const METHODS: PayMethod[] = [...ALL_PAY_METHODS, 'advance'];
 
 export interface BillItemInput {
   kind: 'service' | 'product' | 'custom';
@@ -26,11 +27,13 @@ export interface BillItemInput {
   clientPackageId?: string | null;
 }
 
-export interface BillPaymentInput { method: PayMethod; amount: number; reference?: string }
+export interface BillPaymentInput { method: PayMethod; amount: number; reference?: string; /** For 'advance': a particular advance (else oldest first). */ advanceId?: string | null }
 
 export interface CreateInvoiceInput {
   customerId: string | null;
   appointmentId: string | null;
+  /** Checking out a bridal / group event: every person's appointment is completed on this bill. */
+  eventId?: string | null;
   items: BillItemInput[];
   payments: BillPaymentInput[];
   notes?: string;
@@ -77,6 +80,7 @@ export async function createInvoice(input: CreateInvoiceInput): Promise<ActionRe
       p_data: {
         customer_id: input.customerId || null,
         appointment_id: input.appointmentId || null,
+        event_id: input.eventId || null,
         notes: input.notes?.trim() || null,
         client_gstin: clientGstin,
         client_address: clientAddress,
@@ -92,7 +96,7 @@ export async function createInvoice(input: CreateInvoiceInput): Promise<ActionRe
           code: i.kind === 'service' ? null : i.code?.trim() || null,
           client_package_id: i.kind === 'service' && i.clientPackageId ? i.clientPackageId : null,
         })),
-        payments: payments.map((p) => ({ method: p.method, amount: p.amount, reference: p.reference?.trim() || null })),
+        payments: payments.map((p) => ({ method: p.method, amount: p.amount, reference: p.reference?.trim() || null, ...(p.method === 'advance' && p.advanceId ? { advance_id: p.advanceId } : {}) })),
       },
     })) as { id: string; invoice_no: string };
 

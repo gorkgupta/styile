@@ -9,9 +9,10 @@ export type BookingSource = 'walk_in' | 'phone' | 'online' | 'whatsapp' | 'staff
 /**
  * cash_nu = Bhutanese Ngultrum notes (at par), upi_bhutan = a Bhutanese bank app paying the salon's UPI QR (0008).
  * package = a session from a package the client bought earlier (0011); added by the database from package lines, never
- * chosen at the desk. Coins ('wallet') and package sessions are not money received on the day of the bill.
+ * chosen at the desk. advance = money the client paid earlier for a bridal/event booking (0013), applied on the bill.
+ * Coins ('wallet'), package sessions and advances are not money received on the day of the bill.
  */
-export type PayMethod = 'cash' | 'upi' | 'card' | 'wallet' | 'other' | 'cash_nu' | 'upi_bhutan' | 'package';
+export type PayMethod = 'cash' | 'upi' | 'card' | 'wallet' | 'other' | 'cash_nu' | 'upi_bhutan' | 'package' | 'advance';
 export type ReceiptSize = 'a4' | '80' | '58';
 export type InvoiceStatus = 'paid' | 'partial' | 'unpaid' | 'void';
 export type Hours = Partial<Record<'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun', [string, string][]>>;
@@ -37,6 +38,8 @@ export interface Salon {
   upi_vpa: string | null; upi_payee_name: string | null;
   /** What the bill page prints by default: A4 invoice or an 80/58 mm thermal receipt. */
   receipt_size: ReceiptSize;
+  /** Printed on advance receipts (0014), e.g. "Refundable up to 7 days before the event". Nothing is forfeited automatically. */
+  advance_policy?: string | null;
   created_at: string;
 }
 
@@ -81,6 +84,8 @@ export interface Appointment {
   id: string; salon_id: string; branch_id: string | null; customer_id: string; staff_id: string | null;
   start_at: string; end_at: string; status: ApptStatus; source: BookingSource; token_no: number | null;
   notes: string | null; cancelled_reason: string | null; invoice_id: string | null; created_at: string;
+  /** A person's part of a bridal / group event (0014), and who they are ("Bride", "Mother"). */
+  event_id?: string | null; guest_name?: string | null;
 }
 
 /** Appointment joined with its client and services, as the calendar uses it. */
@@ -101,6 +106,8 @@ export interface Invoice {
   composition_tax: number;
   /** The membership card whose discount this bill got (0012). */
   client_membership_id?: string | null;
+  /** The bridal / group event checked out on this bill (0014). */
+  event_id?: string | null;
 }
 
 export interface InvoiceItem {
@@ -170,6 +177,30 @@ export interface SalonReport {
   package_sessions_outstanding: number; package_outstanding_value: number;
   /** Membership cards sold in the range (their fees are bills, already in revenue), discounts members got, members today. */
   memberships_sold: number; memberships_amount: number; member_discounts: number; active_members: number;
+  /** Advances received in the range (money, not revenue), used on bills in the range, refunded; held now. */
+  advances_received: number; advances_applied: number; advances_refunded: number; advances_outstanding: number;
+  events_in_range: number; events_upcoming: number;
+}
+
+// ---------------------------------------------------------------------------
+// Bridal and event bookings with advances (0014_events_advances.sql)
+// ---------------------------------------------------------------------------
+export type EventType = 'bridal' | 'engagement' | 'party' | 'group' | 'other';
+export interface SalonEvent {
+  id: string; salon_id: string; customer_id: string; event_type: EventType; title: string;
+  /** When everyone must be ready. */
+  event_at: string;
+  location: 'salon' | 'home'; address: string | null; travel_charge: number; quoted_price: number | null; people: number;
+  trial_appointment_id: string | null; notes: string | null; status: 'booked' | 'done' | 'cancelled';
+  cancelled_at: string | null; cancel_reason: string | null; created_at: string;
+}
+/** Money taken before the day, with an advance receipt (not a tax invoice). */
+export interface AdvancePayment {
+  id: string; salon_id: string; customer_id: string; event_id: string | null; receipt_no: string; amount: number; method: PayMethod;
+  reference: string | null; note: string | null; received_at: string; received_by: string | null;
+  /** Used on bills that stand. */
+  applied_amount: number;
+  refunded_at: string | null; refund_amount: number | null; refund_method: PayMethod | null; refund_reason: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -218,10 +249,10 @@ export const SOURCE_LABEL: Record<BookingSource, string> = {
   walk_in: 'Walk-in', phone: 'Phone', online: 'Online', whatsapp: 'WhatsApp', staff: 'Front desk',
 };
 export const METHOD_LABEL: Record<PayMethod, string> = {
-  cash: 'Cash', upi: 'UPI', card: 'Card', wallet: 'Coins', other: 'Other', cash_nu: 'Cash (Nu)', upi_bhutan: 'UPI (Bhutan)', package: 'Package',
+  cash: 'Cash', upi: 'UPI', card: 'Card', wallet: 'Coins', other: 'Other', cash_nu: 'Cash (Nu)', upi_bhutan: 'UPI (Bhutan)', package: 'Package', advance: 'Advance',
 };
-/** Paid from something bought earlier (coins, a package): not money received on the day of the bill. */
-export const PREPAID_METHODS: PayMethod[] = ['wallet', 'package'];
+/** Paid from something bought or paid earlier (coins, a package, an advance): not money received on the day of the bill. */
+export const PREPAID_METHODS: PayMethod[] = ['wallet', 'package', 'advance'];
 export const isPrepaidMethod = (m: string | null | undefined) => (PREPAID_METHODS as string[]).includes(m ?? '');
 /** Every payment type the desk can pick, in the order the desk sees them ('package' is added by the database). */
 export const ALL_PAY_METHODS: PayMethod[] = ['cash', 'upi', 'card', 'cash_nu', 'upi_bhutan', 'wallet', 'other'];

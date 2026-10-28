@@ -18,7 +18,8 @@ import { CoinHistoryList, type CoinRow } from '@/components/app/coin-history';
 import { coinsText, fmtCoins } from '@/lib/coins';
 import { PackageCard } from '@/components/app/client-packages';
 import { dayText, daysLeft, perksText } from '@/lib/packages';
-import type { ClientMembership, ClientPackage } from '@/lib/types';
+import type { AdvancePayment, ClientMembership, ClientPackage, SalonEvent } from '@/lib/types';
+import { countdown, EVENT_TYPE_LABEL, eventMoney } from '@/lib/events';
 
 export interface PortalSalon {
   id: string; name: string; slug: string; city: string | null; phone: string | null;
@@ -54,6 +55,8 @@ export interface PortalProps {
   membership?: ClientMembership | null;
   /** The salon's local date. */
   today?: string;
+  /** Upcoming bridal / group events, with the advances paid. */
+  events?: { event: SalonEvent; advances: AdvancePayment[] }[];
 }
 
 /** Simple top bar shared by the client portal pages. */
@@ -110,6 +113,37 @@ export function PortalHome(p: PortalProps) {
                   : 'Top up at the front desk to pay for your next visits with coins.'}
               </div>
             </div>
+          </section>
+        )}
+
+        {p.known && !!p.events?.length && (
+          <section className="stack" aria-label="Your events">
+            <h2>Your events</h2>
+            {p.events.map(({ event: e, advances }) => {
+              const m = eventMoney(e, advances);
+              const d = localDate(new Date(e.event_at), p.salon.timezone);
+              return (
+                <article key={e.id} className="pt-card pt-event">
+                  <div className="pt-when">
+                    <div className="pt-day">{p.today ? countdown(d, p.today) : fmtDateShort(d)}</div>
+                    <div className="pt-time num">{fmtTime(e.event_at, p.salon.timezone)}</div>
+                  </div>
+                  <div className="grow stack-sm" style={{ gap: 4, minWidth: 0 }}>
+                    <div className="strong">{e.title} <Badge tone="plum">{EVENT_TYPE_LABEL[e.event_type]}</Badge></div>
+                    <div className="small muted">{fmtDateLong(d)} · ready by {fmtTime(e.event_at, p.salon.timezone)}{e.location === 'home' ? ' · home visit' : ` · at ${p.salon.name}`}</div>
+                    <div className="small">
+                      {m.received ? <>Advance paid <span className="num strong">{money(m.received - m.refunded)}</span></> : 'No advance yet'}
+                      {m.quoted ? <> · balance <span className="num strong">{money(m.balanceDue)}</span> on the day</> : ''}
+                    </div>
+                    {advances.length > 0 && (
+                      <div className="row-wrap">
+                        {advances.map((a) => <Link key={a.id} href={`${p.base}/me/receipts/${a.id}`} className="pt-again small"><Icon name="receipt" size={14} />Receipt {a.receipt_no}</Link>)}
+                      </div>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
           </section>
         )}
 

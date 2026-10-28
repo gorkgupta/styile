@@ -31,6 +31,7 @@ export function AppShell(props: ShellProps) {
     { href: '/app/queue', label: 'Walk-ins', icon: 'queue', perm: 'viewCalendar', count: props.queueCount, mobile: true },
     { href: '/app/pos', label: 'New bill', icon: 'receipt', perm: 'bill', mobile: true },
     { href: '/app/invoices', label: 'Bills', icon: 'wallet', perm: 'bill' },
+    { href: '/app/events', label: 'Bridal & events', icon: 'heart', perm: 'events' },
     { href: '/app/close', label: 'Day close', icon: 'lock', perm: 'closeDay' },
     { href: '/app/customers', label: 'Clients', icon: 'users', perm: 'viewClients', mobile: true },
     { href: '/app/inbox', label: 'WhatsApp', icon: 'chat', perm: 'inbox', count: props.inboxUnread },
