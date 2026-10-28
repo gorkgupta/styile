@@ -542,6 +542,193 @@ select t.ok((:'prep'::jsonb -> 'by_method' ->> 'cash_nu')::numeric = 1000 and (:
 select t.fails(format($q$select public.create_invoice(%L, '{"items":[{"kind":"custom","name":"x","qty":1,"unit_price":100}],"payments":[{"method":"paypal","amount":100}]}'::jsonb)$q$, :'salon_u'),
   'unknown payment method rejected on a bill');
 
+-- ===== Day close and expenses (0009) =====
+-- A small parlour (salon C) with an owner (Dolma), a front-desk login (Karma) and a stylist login (Pema).
+-- Day D is eight days ago (salon-local); bills, payments and coin rows are moved onto D with exact local times.
+reset role;
+create function t.at(d date, hhmm text) returns timestamptz language sql immutable as $$
+  select (d + hhmm::time) at time zone 'Asia/Kolkata';
+$$;
+insert into auth.users (id, email, raw_user_meta_data) values
+  ('00000000-0000-0000-0000-0000000000c1', 'dolma@parlour.in', '{"full_name":"Dolma"}'),
+  ('00000000-0000-0000-0000-0000000000c2', 'karma@parlour.in', '{"full_name":"Karma"}'),
+  ('00000000-0000-0000-0000-0000000000c3', 'pema@parlour.in', '{"full_name":"Pema"}');
+select (now() at time zone 'Asia/Kolkata')::date - 8 as d \gset
+set role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000c1","role":"authenticated"}', false);
+select (public.create_salon('Dolma Beauty Parlour', 'dolma-parlour', '919800000003', 'Jaigaon', 'Dolma')).id as salon_c \gset
+select id as dolma_staff from public.staff where salon_id = :'salon_c' and user_id = '00000000-0000-0000-0000-0000000000c1' \gset
+insert into public.staff (salon_id, user_id, name) values (:'salon_c', '00000000-0000-0000-0000-0000000000c2', 'Karma') returning id as karma_staff \gset
+insert into public.staff (salon_id, user_id, name) values (:'salon_c', '00000000-0000-0000-0000-0000000000c3', 'Pema') returning id as pema_staff \gset
+insert into public.salon_members (salon_id, user_id, role, staff_id) values
+  (:'salon_c', '00000000-0000-0000-0000-0000000000c2', 'receptionist', :'karma_staff'),
+  (:'salon_c', '00000000-0000-0000-0000-0000000000c3', 'stylist', :'pema_staff');
+insert into public.customers (salon_id, name, phone) values (:'salon_c', 'Tashi', '97517112233') returning id as tashi \gset
+select id as c_haircut from public.services where salon_id = :'salon_c' and name = 'Haircut' \gset
+select id as c_facial from public.services where salon_id = :'salon_c' and name = 'Facial' \gset
+-- Dolma: an unpaid bill three days before D (paid later, on D)
+select (public.create_invoice(:'salon_c', '{"items":[{"kind":"custom","name":"Threading x4","qty":1,"unit_price":800}]}'::jsonb)).id as b4 \gset
+-- Dolma: a UPI bill at 3:00 AM on D (still the previous day in UTC)
+select (public.create_invoice(:'salon_c', '{"items":[{"kind":"custom","name":"Eyebrows","qty":1,"unit_price":200}],"payments":[{"method":"upi","amount":200}]}'::jsonb)).id as b7 \gset
+
+-- Karma at the front desk
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000c2","role":"authenticated"}', false);
+select (public.create_invoice(:'salon_c', jsonb_build_object('items', jsonb_build_array(jsonb_build_object('kind','service','service_id',:'c_haircut','staff_id',:'pema_staff','name','Haircut','qty',1,'unit_price',1000)),
+  'payments', '[{"method":"cash","amount":1000}]'::jsonb))).id as b1 \gset
+select (public.create_invoice(:'salon_c', jsonb_build_object('items', jsonb_build_array(jsonb_build_object('kind','service','service_id',:'c_facial','staff_id',:'pema_staff','name','Facial','qty',1,'unit_price',2000,'discount',200)),
+  'payments', '[{"method":"upi","amount":1800}]'::jsonb))).id as b2 \gset
+select (public.create_invoice(:'salon_c', '{"items":[{"kind":"product","name":"Hair oil","qty":1,"unit_price":500}],"payments":[{"method":"cash","amount":500}]}'::jsonb)).id as b3 \gset
+select (public.add_payment(:'b4', 'cash', 800)).status as b4_status \gset
+select (public.create_invoice(:'salon_c', '{"items":[{"kind":"custom","name":"Head massage","qty":1,"unit_price":300}],"payments":[{"method":"cash","amount":300}]}'::jsonb)).id as b5 \gset
+select (public.create_invoice(:'salon_c', '{"items":[{"kind":"custom","name":"Late wax","qty":1,"unit_price":999}],"payments":[{"method":"cash","amount":999}]}'::jsonb)).id as b6 \gset
+select public.load_coins(:'salon_c', :'tashi', 2000, 2100, 'cash') \gset
+select (public.create_invoice(:'salon_c', jsonb_build_object('customer_id', :'tashi', 'items', jsonb_build_array(jsonb_build_object('kind','service','staff_id',:'pema_staff','name','Pedicure','qty',1,'unit_price',700)),
+  'payments', '[{"method":"wallet","amount":700}]'::jsonb))).id as b8 \gset
+-- Dolma cancels the hair oil bill
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000c1","role":"authenticated"}', false);
+select public.void_invoice(:'b3', 'Client returned the oil') \gset
+select t.ok((select voided_by from public.invoices where id = :'b3') = '00000000-0000-0000-0000-0000000000c1', 'cancelling a bill records who cancelled it');
+-- Expenses on D (owner)
+insert into public.expenses (salon_id, spent_on, category, amount, paid_from, note) values
+  (:'salon_c', :'d', 'Electricity', 1500, 'upi', 'October bill'),
+  (:'salon_c', :'d', 'Tea & snacks', 120, 'cash', null);
+insert into public.expenses (salon_id, spent_on, category, amount, paid_from, staff_id) values (:'salon_c', :'d', 'Staff advance', 1000, 'cash', :'pema_staff') returning id as adv \gset
+select t.ok((select created_by from public.expenses where id = :'adv') = '00000000-0000-0000-0000-0000000000c1', 'expense records who added it');
+select t.fails(format($q$insert into public.expenses (salon_id, spent_on, category, amount, staff_id) values (%L, %L, 'Staff advance', 100, %L)$q$, :'salon_c', :'d', :'priya'), 'staff advance cannot name another salon''s staff');
+select t.fails(format($q$insert into public.expenses (salon_id, spent_on, category, amount) values (%L, %L, 'Rent', 100)$q$, :'salon_c', (now() at time zone 'Asia/Kolkata')::date + 2), 'expense date cannot be in the future');
+select t.fails(format($q$insert into public.expenses (salon_id, spent_on, category, amount) values (%L, %L, 'Bribes', 100)$q$, :'salon_c', :'d'), 'expense category must be one of the list');
+select t.fails(format($q$insert into public.expenses (salon_id, spent_on, category, amount) values (%L, %L, 'Rent', 0)$q$, :'salon_c', :'d'), 'expense amount must be more than zero');
+select t.fails(format($q$insert into public.expenses (salon_id, spent_on, category, amount, staff_id) values (%L, %L, 'Rent', 100, %L)$q$, :'salon_c', :'d', :'pema_staff'), 'only staff advances name a staff member');
+
+-- Put everything at exact salon-local times
+reset role;
+update public.invoices set created_at = t.at(:'d'::date - 3, '17:00') where id = :'b4';
+update public.invoices set created_at = t.at(:'d', '03:00') where id = :'b7';
+update public.payments set created_at = t.at(:'d', '03:00') where invoice_id = :'b7';
+update public.invoices set created_at = t.at(:'d', '10:00') where id = :'b1';
+update public.payments set created_at = t.at(:'d', '10:00') where invoice_id = :'b1';
+update public.invoices set created_at = t.at(:'d', '12:00') where id = :'b2';
+update public.payments set created_at = t.at(:'d', '12:00') where invoice_id = :'b2';
+update public.invoices set created_at = t.at(:'d', '13:00'), voided_at = t.at(:'d', '18:00') where id = :'b3';
+update public.payments set created_at = t.at(:'d', '13:00') where invoice_id = :'b3';
+update public.payments set created_at = t.at(:'d', '15:00') where invoice_id = :'b4';
+update public.invoices set created_at = t.at(:'d', '23:30') where id = :'b5';
+update public.payments set created_at = t.at(:'d', '23:30') where invoice_id = :'b5';
+update public.invoices set created_at = t.at(:'d'::date + 1, '00:15') where id = :'b6';
+update public.payments set created_at = t.at(:'d'::date + 1, '00:15') where invoice_id = :'b6';
+update public.coin_transactions set created_at = t.at(:'d', '11:00') where customer_id = :'tashi' and kind in ('load', 'bonus');
+update public.invoices set created_at = t.at(:'d', '16:00') where id = :'b8';
+update public.payments set created_at = t.at(:'d', '16:00') where invoice_id = :'b8';
+update public.coin_transactions set created_at = t.at(:'d', '16:00') where invoice_id = :'b8';
+select t.ok((t.at(:'d'::date + 1, '00:15') at time zone 'UTC')::date = :'d'::date and (t.at(:'d', '03:00') at time zone 'UTC')::date = :'d'::date - 1, 'test set-up: two payments sit on the other side of the UTC date line');
+
+-- Previous day: closed with ₹2,000 counted, ₹500 taken home => ₹1,500 opening cash on D
+set role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000c1","role":"authenticated"}', false);
+select * from public.close_day(:'salon_c', :'d'::date - 1, 2000, null, 'First day on Styile', 500) \gset prev_
+select t.ok(:prev_expected_cash = 0 and :prev_difference = 2000 and :prev_opening_cash = 0, 'close with nothing recorded: whole count shows as excess');
+
+-- Karma (front desk) looks at D
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000c2","role":"authenticated"}', false);
+select public.day_summary(:'salon_c', :'d') as s \gset
+select t.ok((:'s'::jsonb #>> '{totals,bills}')::int = 5 and (:'s'::jsonb #>> '{totals,sales}')::numeric = 4000,
+  'summary: 5 bills worth ₹4,000 (cancelled bill and the 12:15 AM bill left out, the 3 AM bill counted)');
+select t.ok((:'s'::jsonb #>> '{totals,voids}')::int = 1 and (:'s'::jsonb #>> '{totals,voids_total}')::numeric = 500
+  and (:'s'::jsonb #>> '{voids,0,voided_by}') = 'Dolma' and (:'s'::jsonb #>> '{voids,0,billed_by}') = 'Karma'
+  and (:'s'::jsonb #>> '{voids,0,reason}') = 'Client returned the oil' and (:'s'::jsonb #>> '{voids,0,paid_by_method,cash}')::numeric = 500,
+  'summary: cancelled bill with amount, who billed, who cancelled, reason and cash paid on it');
+select t.ok((:'s'::jsonb #>> '{totals,discounts}')::numeric = 200 and (:'s'::jsonb #>> '{discounts,0,billed_by}') = 'Karma', 'summary: discounts given and by whom');
+select t.ok((:'s'::jsonb #>> '{by_method,cash,bills}')::numeric = 2600 and (:'s'::jsonb #>> '{by_method,cash,coins}')::numeric = 2000
+  and (:'s'::jsonb #>> '{by_method,cash,refunds}')::numeric = 500 and (:'s'::jsonb #>> '{by_method,upi,net}')::numeric = 2000
+  and (:'s'::jsonb #>> '{by_method,wallet,bills}')::numeric = 700,
+  'summary: payments by method include a later payment on an older bill, coins sold for cash and the refund');
+select t.ok((:'s'::jsonb #>> '{totals,collected}')::numeric = 6100 and (:'s'::jsonb #>> '{totals,received}')::numeric = 6600,
+  'summary: money collected ₹6,100 (paying with coins is not money)');
+select t.ok((:'s'::jsonb #>> '{totals,coins_sold}')::numeric = 2000 and (:'s'::jsonb #>> '{totals,coins_bonus}')::numeric = 100
+  and (:'s'::jsonb #>> '{totals,coins_used}')::numeric = 700, 'summary: coins sold vs used');
+select t.ok((:'s'::jsonb #>> '{totals,expenses}')::numeric = 2620 and (:'s'::jsonb #>> '{totals,expenses_cash}')::numeric = 1120
+  and (:'s'::jsonb #>> '{expenses,by_paid_from,upi}')::numeric = 1500 and (:'s'::jsonb #>> '{expenses,by_category,Staff advance}')::numeric = 1000,
+  'summary: expenses by how they were paid and by category');
+select t.ok((:'s'::jsonb #>> '{opening,cash}')::numeric = 1500 and (:'s'::jsonb #>> '{totals,expected_cash}')::numeric = 4480,
+  'cash expected = 1,500 opening + 4,600 cash in − 500 handed back − 1,120 cash expenses = 4,480');
+select t.ok((:'s'::jsonb #>> '{totals,expected_cash_nu}')::numeric = 0 and not (:'s'::jsonb ->> 'uses_nu')::boolean, 'no Ngultrum expected when none was taken');
+select t.ok((select (e ->> 'services')::int = 3 and (e ->> 'sales')::numeric = 3500
+             from jsonb_array_elements(:'s'::jsonb -> 'by_staff') e where e ->> 'name' = 'Pema'), 'by staff: Pema did 3 services, ₹3,500 (unregistered salon: no GST)');
+select t.ok((select (e #>> '{collected_by_method,cash}')::numeric = 4600 and (e #>> '{collected_by_method,upi}')::numeric = 1800
+             and (e ->> 'collected')::numeric = 6400 and e ->> 'staff_id' = :'karma_staff'
+             from jsonb_array_elements(:'s'::jsonb -> 'by_staff') e where e ->> 'name' = 'Karma'), 'by staff: Karma took ₹4,600 cash and ₹1,800 UPI');
+select t.ok((select (e #>> '{collected_by_method,upi}')::numeric = 200 from jsonb_array_elements(:'s'::jsonb -> 'by_staff') e where e ->> 'name' = 'Dolma'),
+  'by staff: Dolma took the 3 AM UPI payment');
+select t.ok((public.day_summary(:'salon_c', :'d'::date + 1) #>> '{by_method,cash,bills}')::numeric = 999, 'the 12:15 AM payment belongs to the next day');
+
+-- Receptionist closes D
+select t.fails(format('select public.close_day(%L, %L, 100)', :'salon_c', (now() at time zone 'Asia/Kolkata')::date + 1), 'cannot close a future day');
+select t.fails(format('select public.close_day(%L, %L, -5)', :'salon_c', :'d'), 'counted cash cannot be negative');
+select t.fails(format('select public.close_day(%L, %L, 100, null, null, 200)', :'salon_c', :'d'), 'cannot take out more cash than counted');
+select t.fails(format($q$insert into public.day_closes (salon_id, business_date, counted_cash, expected_cash, difference) values (%L, %L, 0, 0, 0)$q$, :'salon_c', :'d'), 'a close cannot be inserted directly (snapshot comes from the database)');
+select * from public.close_day(:'salon_c', :'d', 4400, null, 'Short ₹80 — checking with Karma', 4000) \gset cl_
+select t.ok(:cl_expected_cash = 4480 and :cl_difference = -80 and :cl_opening_cash = 1500 and :'cl_closed_by' = '00000000-0000-0000-0000-0000000000c2',
+  'front desk closes the day: ₹80 short recorded');
+select t.ok((select jsonb_array_length(by_staff) = 3 and (totals ->> 'collected')::numeric = 6100 and (by_method #>> '{cash,net}')::numeric = 4100
+             and details ->> 'closed_by_name' = 'Karma' and jsonb_array_length(details -> 'voids') = 1
+             from public.day_closes where id = :'cl_id'), 'close keeps the snapshot (by staff, by method, totals, cancelled bills)');
+select t.fails(format('select public.close_day(%L, %L, 4480)', :'salon_c', :'d'), 'a day cannot be closed twice');
+select t.ok((public.day_summary(:'salon_c', :'d'::date + 1) #>> '{opening,cash}')::numeric = 400, 'next day opens with what was left in the drawer (₹4,400 − ₹4,000 taken out)');
+-- Expenses: front desk adds today's, cannot touch closed or older days
+insert into public.expenses (salon_id, spent_on, category, amount, paid_from) values (:'salon_c', public.salon_today(:'salon_c'), 'Tea & snacks', 60, 'cash') returning id as tea \gset
+select t.ok((select count(*) from public.expenses where salon_id = :'salon_c') = 1, 'front desk sees today''s expenses only');
+select t.fails(format($q$insert into public.expenses (salon_id, spent_on, category, amount) values (%L, %L, 'Rent', 100)$q$, :'salon_c', :'d'::date + 2), 'front desk cannot back-date expenses');
+update public.expenses set amount = 6 where id = :'tea';
+delete from public.expenses where id = :'tea';
+select t.ok((select amount from public.expenses where id = :'tea') = 60, 'front desk cannot edit or delete expenses');
+delete from public.day_closes where id = :'cl_id';
+select t.ok(exists (select 1 from public.day_closes where id = :'cl_id'), 'front desk cannot reopen a closed day');
+
+-- Stylist
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000c3","role":"authenticated"}', false);
+select t.ok((select count(*) from public.expenses) = 0, 'stylist cannot see expenses');
+select t.ok((select count(*) from public.day_closes) = 0, 'stylist cannot see day closes');
+select t.fails(format('select public.day_summary(%L, %L)', :'salon_c', :'d'), 'stylist cannot see the day summary');
+select t.fails(format('select public.close_day(%L, %L, 0)', :'salon_c', public.salon_today(:'salon_c')), 'stylist cannot close the day');
+select t.fails(format($q$insert into public.expenses (salon_id, spent_on, category, amount) values (%L, %L, 'Rent', 100)$q$, :'salon_c', public.salon_today(:'salon_c')), 'stylist cannot add expenses');
+select t.fails(format('select public.expense_report(%L, %L, %L)', :'salon_c', :'d', :'d'), 'stylist cannot see the expense report');
+delete from public.day_closes where id = :'cl_id';
+
+-- Another salon's owner
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-00000000000b","role":"authenticated"}', false);
+select t.ok((select count(*) from public.expenses) = 0 and (select count(*) from public.day_closes) = 0, 'other salon cannot see expenses or closes');
+select t.fails(format('select public.day_summary(%L, %L)', :'salon_c', :'d'), 'other salon cannot read the day summary');
+select t.fails(format('select public.close_day(%L, %L, 0)', :'salon_c', public.salon_today(:'salon_c')), 'other salon cannot close the day');
+select t.fails(format($q$insert into public.expenses (salon_id, spent_on, category, amount) values (%L, %L, 'Rent', 100)$q$, :'salon_c', public.salon_today(:'salon_c')), 'other salon cannot add expenses');
+select t.fails(format('select public.expense_report(%L, %L, %L)', :'salon_c', :'d', :'d'), 'other salon cannot read the expense report');
+delete from public.day_closes where id = :'cl_id';
+delete from public.expenses where id = :'tea';
+
+-- Owner: closed days freeze their expenses; reopening unfreezes and allows a new close
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000c1","role":"authenticated"}', false);
+select t.ok(exists (select 1 from public.day_closes where id = :'cl_id') and exists (select 1 from public.expenses where id = :'tea'), 'stylist and other salon could not delete anything');
+select t.ok(t.err(format($q$update public.expenses set amount = 1400 where id = %L$q$, :'adv')) like 'The day % is closed.%', 'expenses of a closed day cannot be changed');
+select t.fails(format($q$insert into public.expenses (salon_id, spent_on, category, amount) values (%L, %L, 'Repairs', 300)$q$, :'salon_c', :'d'), 'expenses cannot be added to a closed day');
+select t.ok((public.expense_report(:'salon_c', :'d', :'d') ->> 'total')::numeric = 2620 and (public.expense_report(:'salon_c', :'d', :'d') ->> 'staff_advances')::numeric = 1000,
+  'expense report totals and staff advances');
+delete from public.day_closes where id = :'cl_id';
+select t.ok(not exists (select 1 from public.day_closes where id = :'cl_id'), 'owner reopens the day');
+insert into public.expenses (salon_id, spent_on, category, amount, paid_from) values (:'salon_c', :'d', 'Repairs', 80, 'cash');
+select * from public.close_day(:'salon_c', :'d', 4400, 25, 'Found the ₹80: dryer repair', 4000, 25) \gset cl2_
+select t.ok(:cl2_expected_cash = 4400 and :cl2_difference = 0 and :cl2_difference_nu = 25, 'closing again after reopening: balanced (Ngultrum counted separately)');
+
+-- ===== Day close with Ngultrum cash (0008 + 0009) =====
+reset role;
+set role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000c1","role":"authenticated"}', false);
+select (public.create_invoice(:'salon_c', '{"items":[{"kind":"custom","name":"Haircut (Bhutanese client)","qty":1,"unit_price":450}],"payments":[{"method":"cash_nu","amount":450}]}'::jsonb)).id as nu_bill \gset
+select public.day_summary(:'salon_c', (now() at time zone 'Asia/Kolkata')::date) as s_nu \gset
+select t.ok((:'s_nu'::jsonb -> 'totals' ->> 'expected_cash_nu')::numeric >= 450 and (:'s_nu'::jsonb ->> 'uses_nu')::boolean,
+  'Ngultrum cash is expected separately in the drawer');
+select t.ok(not ((:'s_nu'::jsonb -> 'totals' ->> 'expected_cash')::numeric >= 450 and (:'s_nu'::jsonb -> 'totals' ->> 'expected_cash')::numeric - 450 = (:'s_nu'::jsonb -> 'totals' ->> 'opening_cash')::numeric),
+  'Ngultrum is not added to the rupee drawer');
+reset role;
+
 -- ===== Anonymous =====
 reset role;
 set role anon;

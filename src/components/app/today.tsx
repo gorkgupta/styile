@@ -8,7 +8,7 @@ import { AppointmentSheet, NewAppointmentSheet, type MenuProps } from './appoint
 import { useLiveRefresh } from './live';
 import { money } from '@/lib/billing';
 import { rootDomain, salonUrl } from '@/lib/tenant';
-import { fmtDateLong, fmtTime } from '@/lib/time';
+import { fmtDateLong, fmtDateShort, fmtTime } from '@/lib/time';
 import type { AppointmentFull } from '@/lib/types';
 
 export interface TodayProps {
@@ -25,6 +25,8 @@ export interface TodayProps {
   isOwner: boolean;
   welcome?: boolean;
   denied?: boolean;
+  /** Yesterday had payments but wasn't closed (shown to roles that can close the day). */
+  unclosedDay?: string | null;
 }
 
 function greeting(nowIso: string, tz: string) {
@@ -73,6 +75,11 @@ export function TodayView(p: TodayProps) {
       />
       <div className="page">
         {p.denied && <Notice tone="warn">Your role doesn&apos;t have access to that page. Ask the salon owner if you need it.</Notice>}
+        {p.unclosedDay && (
+          <Notice tone="warn">
+            Yesterday ({fmtDateShort(p.unclosedDay)}) wasn&apos;t closed. <Link href={`/app/close?date=${p.unclosedDay}`} className="strong">Count the cash and close it</Link> so today starts from the right opening cash.
+          </Notice>
+        )}
 
         <div className="stats">
           {p.revenueToday !== null && <Stat label="Billed today" value={money(p.revenueToday)} sub={`${done.length} client${done.length === 1 ? '' : 's'} checked out`} />}

@@ -2,6 +2,7 @@ import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { addDays, zonedToUtc } from './time';
 import type { AppointmentFull, Service, ServiceCategory, Staff } from './types';
+import type { Expense, ExpenseRow } from './dayclose';
 
 const APPT_SELECT = '*, customer:customers(id, name, phone, visit_count, notes), services:appointment_services(service_id, name, price, duration_min, sort)';
 
@@ -34,4 +35,31 @@ export async function getTeam(db: SupabaseClient, salonId: string, includeInacti
   if (!includeInactive) q = q.eq('active', true);
   const { data } = await q;
   return (data ?? []) as Staff[];
+}
+
+/** Expenses between two salon-local dates (inclusive), newest first, with the advance taker's and the adder's names. */
+export async function getExpenses(db: SupabaseClient, salonId: string, from: string, to: string): Promise<ExpenseRow[]> {
+  const { data, error } = await db.from('expenses').select('*, staff:staff_id(name)')
+    .eq('salon_id', salonId).gte('spent_on', from).lte('spent_on', to)
+    .order('spent_on', { ascending: false }).order('created_at', { ascending: false }).limit(1000);
+  if (error) throw error;
+  const rows = (data ?? []) as (Expense & { staff: { name: string } | null })[];
+  const names = await memberNames(db, salonId, rows.map((r) => r.created_by));
+  return rows.map(({ staff, ...e }) => ({
+    ...e, amount: Number(e.amount), staff_name: staff?.name ?? null, created_by_name: e.created_by ? names.get(e.created_by) ?? null : null,
+  }));
+}
+
+/** Display names for logins in this salon: their staff record's name, else their profile name. */
+export async function memberNames(db: SupabaseClient, salonId: string, userIds: (string | null)[]): Promise<Map<string, string>> {
+  const ids = [...new Set(userIds.filter((x): x is string => !!x))];
+  const out = new Map<string, string>();
+  if (!ids.length) return out;
+  const [staff, profiles] = await Promise.all([
+    db.from('staff').select('user_id, name').eq('salon_id', salonId).in('user_id', ids),
+    db.from('profiles').select('id, full_name').in('id', ids),
+  ]);
+  for (const p of (profiles.data ?? []) as { id: string; full_name: string | null }[]) if (p.full_name) out.set(p.id, p.full_name);
+  for (const s of (staff.data ?? []) as { user_id: string; name: string }[]) out.set(s.user_id, s.name);
+  return out;
 }

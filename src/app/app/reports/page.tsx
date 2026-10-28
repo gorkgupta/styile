@@ -3,6 +3,7 @@ import { requirePermission } from '@/lib/context';
 import { previousRange, resolveRange } from '@/lib/report-range';
 import { localDate } from '@/lib/time';
 import type { SalonReport } from '@/lib/types';
+import { normalizeExpenseReport } from '@/lib/dayclose';
 
 export const metadata = { title: 'Reports' };
 
@@ -19,9 +20,10 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   const range = resolveRange(sp, today);
   const prev = previousRange(range);
 
-  const [cur, before] = await Promise.all([
+  const [cur, before, spent] = await Promise.all([
     ctx.supabase.rpc('salon_report', { p_salon: ctx.salon.id, p_from: range.from, p_to: range.to }),
     ctx.supabase.rpc('salon_report', { p_salon: ctx.salon.id, p_from: prev.from, p_to: prev.to }),
+    ctx.supabase.rpc('expense_report', { p_salon: ctx.salon.id, p_from: range.from, p_to: range.to }),
   ]);
   if (cur.error) throw cur.error;
 
@@ -33,6 +35,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       today={today}
       salonName={ctx.salon.name}
       gstMode={ctx.salon.gst_mode}
+      expenses={spent.error ? null : normalizeExpenseReport(spent.data)}
     />
   );
 }
