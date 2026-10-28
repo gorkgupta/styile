@@ -2,10 +2,11 @@
 import Link from 'next/link';
 import { Badge, Button } from '@/components/ui/ui';
 import { Icon } from '@/components/ui/icons';
-import { amountInWords, money2 } from '@/lib/billing';
+import { amountInWords, money2, taxByRate } from '@/lib/billing';
+import { billDocument } from '@/lib/gst';
 import { formatPhone } from '@/lib/phone';
 import { fmtDateTime } from '@/lib/time';
-import type { InvoiceStatus, PayMethod } from '@/lib/types';
+import type { BillType, InvoiceStatus, PayMethod } from '@/lib/types';
 import { METHOD_LABEL } from '@/lib/types';
 import { PortalHeader } from './portal';
 
@@ -14,9 +15,14 @@ export interface CustomerBill {
   invoice: {
     invoice_no: string; created_at: string; status: InvoiceStatus; prices_include_tax: boolean;
     subtotal: number; discount_total: number; taxable_total: number; cgst: number; sgst: number; igst: number; round_off: number; total: number; paid_total: number;
+    /** How the bill was issued (0007): its title, the GSTIN printed and the place of supply. */
+    bill_type: BillType; seller_gstin: string | null; place_of_supply: string | null; client_gstin: string | null; client_address: string | null;
   };
   customer: { name: string; phone: string } | null;
-  items: { id: string; name: string; qty: number; unit_price: number; discount: number; gst_rate: number; line_total: number; stylist: string | null }[];
+  items: {
+    id: string; name: string; kind: 'service' | 'product' | 'custom'; code: string | null; qty: number; unit_price: number; discount: number;
+    gst_rate: number; taxable: number; tax: number; line_total: number; stylist: string | null;
+  }[];
   payments: { method: PayMethod; amount: number }[];
 }
 
@@ -28,8 +34,10 @@ export function BillView({ bill, phone, base }: { bill: CustomerBill; phone?: st
   const { salon, invoice: inv } = bill;
   const balance = Math.max(0, Number(inv.total) - Number(inv.paid_total));
   const address = [salon.address, salon.city, salon.state, salon.pincode].filter(Boolean).join(', ');
-  const rates = [...new Set(bill.items.map((i) => Number(i.gst_rate)))];
-  const halfRate = rates.length === 1 ? `${rates[0] / 2}%` : '';
+  const doc = billDocument(inv.bill_type);
+  const gstin = doc.showGstin ? inv.seller_gstin : null;
+  const rates = doc.showTax ? taxByRate(bill.items) : [];
+  const halfRate = rates.length === 1 ? `@ ${rates[0].rate / 2}%` : '';
   return (
     <div className="pt">
       <div className="no-print"><PortalHeader phone={phone} base={base} salonName={salon.name} /></div>
@@ -45,19 +53,23 @@ export function BillView({ bill, phone, base }: { bill: CustomerBill; phone?: st
               {salon.legalName && salon.legalName !== salon.name && <div className="small ink2">{salon.legalName}</div>}
               {address && <div className="small muted">{address}</div>}
               {salon.phone && <div className="small muted">{formatPhone(salon.phone)}</div>}
-              {salon.gstin && <div className="small"><span className="muted">GSTIN</span> <span className="num strong">{salon.gstin}</span></div>}
+              {gstin && <div className="small"><span className="muted">GSTIN</span> <span className="num strong">{gstin}</span></div>}
             </div>
             <div className="pt-bill-meta">
-              <div className="tiny muted">{salon.gstin ? 'Tax invoice' : 'Bill'}</div>
+              <div className="tiny muted pt-bill-kind">{doc.title}</div>
               <div className="strong num">{inv.invoice_no}</div>
               <div className="small muted">{fmtDateTime(inv.created_at, salon.timezone)}</div>
+              {doc.showTax && inv.place_of_supply && <div className="tiny muted">Place of supply: {inv.place_of_supply}</div>}
               <Badge tone={STATUS[inv.status].tone}>{STATUS[inv.status].label}</Badge>
             </div>
           </header>
+          {doc.declaration && <p className="small strong ink2">{doc.declaration}</p>}
 
           {bill.customer && (
             <div className="pt-bill-to small">
               <span className="muted">Billed to</span> <span className="strong">{bill.customer.name}</span> <span className="muted num">{formatPhone(bill.customer.phone)}</span>
+              {inv.client_address && <div className="ink2">{inv.client_address}</div>}
+              {inv.client_gstin && <div><span className="muted">GSTIN</span> <span className="num strong">{inv.client_gstin}</span></div>}
             </div>
           )}
 
@@ -69,7 +81,9 @@ export function BillView({ bill, phone, base }: { bill: CustomerBill; phone?: st
                   <tr key={i.id}>
                     <td>
                       <div className="strong">{i.name}</div>
-                      <div className="tiny muted">{[i.stylist, `GST ${Number(i.gst_rate)}%`, Number(i.discount) ? `Discount ${money2(i.discount)}` : null].filter(Boolean).join(' · ')}</div>
+                      <div className="tiny muted">{[i.stylist, doc.showTax ? `GST ${Number(i.gst_rate)}%` : null,
+                        doc.showTax && i.code ? `${i.kind === 'product' ? 'HSN' : 'SAC'} ${i.code}` : null,
+                        Number(i.discount) ? `Discount ${money2(i.discount)}` : null].filter(Boolean).join(' · ')}</div>
                     </td>
                     <td className="right num">{Number(i.qty)}</td>
                     <td className="right num hide-mobile">{money2(i.unit_price)}</td>
@@ -83,20 +97,23 @@ export function BillView({ bill, phone, base }: { bill: CustomerBill; phone?: st
           <dl className="pt-bill-totals">
             <div><dt>Subtotal</dt><dd className="num">{money2(inv.subtotal)}</dd></div>
             {Number(inv.discount_total) > 0 && <div><dt>Discount</dt><dd className="num">−{money2(inv.discount_total)}</dd></div>}
-            <div><dt>Taxable value</dt><dd className="num">{money2(inv.taxable_total)}</dd></div>
-            {Number(inv.igst) > 0 ? (
-              <div><dt>IGST</dt><dd className="num">{money2(inv.igst)}</dd></div>
-            ) : (
-              <>
-                <div><dt>CGST {halfRate}</dt><dd className="num">{money2(inv.cgst)}</dd></div>
-                <div><dt>SGST {halfRate}</dt><dd className="num">{money2(inv.sgst)}</dd></div>
-              </>
-            )}
+            {doc.showTax && <>
+              <div><dt>Taxable value</dt><dd className="num">{money2(inv.taxable_total)}</dd></div>
+              {Number(inv.igst) > 0 ? (
+                <div><dt>IGST</dt><dd className="num">{money2(inv.igst)}</dd></div>
+              ) : (
+                <>
+                  <div><dt>CGST {halfRate}</dt><dd className="num">{money2(inv.cgst)}</dd></div>
+                  <div><dt>SGST {halfRate}</dt><dd className="num">{money2(inv.sgst)}</dd></div>
+                </>
+              )}
+            </>}
             {Number(inv.round_off) !== 0 && <div><dt>Round off</dt><dd className="num">{money2(inv.round_off)}</dd></div>}
             <div className="pt-bill-grand"><dt>Total</dt><dd className="num">{money2(inv.total)}</dd></div>
           </dl>
           <p className="small ink2 pt-bill-words">{amountInWords(Number(inv.total))}</p>
-          {inv.prices_include_tax && <p className="tiny muted">Prices include GST.</p>}
+          {doc.showTax && inv.prices_include_tax && <p className="tiny muted">Prices include GST.</p>}
+          {doc.type === 'bill' && <p className="tiny muted">No GST charged.</p>}
 
           <div className="pt-bill-paid">
             {bill.payments.length > 0 && (

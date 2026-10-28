@@ -6,14 +6,15 @@ import { fail, must } from '@/lib/actions';
 import { checkCoinPacks } from '@/lib/coins';
 import { cleanHours } from '@/lib/hours';
 import { invalidPhoneMessage, normalizePhone } from '@/lib/phone';
-import type { ActionResult, CoinPack, Hours } from '@/lib/types';
+import { cleanGstin, GSTIN_RE, stateByCode, stateByName } from '@/lib/gst';
+import type { ActionResult, CoinPack, GstMode, Hours } from '@/lib/types';
 
 // Salon settings. Only the owner can change these (RLS: salons_owner_update). Subscription, booking link
 // and WhatsApp number fields are guarded by a trigger and managed by the platform admin, so they are
 // never written from here.
 
 const NOT_ALLOWED = 'Only the salon owner can change settings.';
-const GST_RATES = [0, 5, 12, 18, 28];
+const GST_MODES: GstMode[] = ['unregistered', 'composition', 'regular'];
 const SLOT_INTERVALS = [5, 10, 15, 20, 30, 60];
 const ASSISTANT_NOTES_MAX = 1500; // keep in step with the Settings screen counter
 
@@ -29,9 +30,10 @@ const text = (v: unknown, max: number) => {
   return s ? s.slice(0, max) : null;
 };
 
+// GSTIN and state are saved with the GST status in updateBilling (Settings → Billing & GST).
 export interface SalonProfileInput {
-  name: string; legalName?: string | null; gstin?: string | null; phone?: string | null; email?: string | null;
-  address?: string | null; city?: string | null; state?: string | null; pincode?: string | null;
+  name: string; legalName?: string | null; phone?: string | null; email?: string | null;
+  address?: string | null; city?: string | null; pincode?: string | null;
 }
 
 export async function updateSalonProfile(input: SalonProfileInput): Promise<ActionResult> {
@@ -40,8 +42,6 @@ export async function updateSalonProfile(input: SalonProfileInput): Promise<Acti
     if (!ctx) return { ok: false, error: NOT_ALLOWED };
     const name = text(input.name, 80);
     if (!name || name.length < 2) return { ok: false, error: 'Enter your salon’s name.' };
-    const gstin = (input.gstin ?? '').replace(/\s/g, '').toUpperCase() || null;
-    if (gstin && !/^[0-9]{2}[A-Z0-9]{13}$/.test(gstin)) return { ok: false, error: 'GSTIN should be 15 characters, like 29ABCDE1234F1Z5. Leave it blank if you aren’t registered.' };
     let phone: string | null = null;
     if (input.phone && input.phone.trim()) {
       phone = normalizePhone(input.phone);
@@ -53,29 +53,44 @@ export async function updateSalonProfile(input: SalonProfileInput): Promise<Acti
     if (pincode && !/^[1-9][0-9]{5}$/.test(pincode)) return { ok: false, error: 'PIN code should be 6 digits.' };
 
     must(await ctx.supabase.from('salons').update({
-      name, legal_name: text(input.legalName, 120), gstin, phone, email,
-      address: text(input.address, 240), city: text(input.city, 60), state: text(input.state, 60), pincode,
+      name, legal_name: text(input.legalName, 120), phone, email,
+      address: text(input.address, 240), city: text(input.city, 60), pincode,
     }).eq('id', ctx.salon.id));
     refresh();
     return { ok: true, message: 'Salon profile saved' };
   } catch (e) { return fail(e); }
 }
 
-export interface BillingSettingsInput { pricesIncludeTax: boolean; defaultGstRate: number; invoicePrefix: string }
+export interface BillingSettingsInput {
+  gstMode: GstMode; gstin?: string | null; state: string; pricesIncludeTax: boolean; invoicePrefix: string;
+}
 
+/** GST status, GSTIN, state (place of supply), price display and bill numbering. */
 export async function updateBilling(input: BillingSettingsInput): Promise<ActionResult> {
   try {
     const ctx = await ownerContext();
     if (!ctx) return { ok: false, error: NOT_ALLOWED };
-    const rate = Number(input.defaultGstRate);
-    if (!GST_RATES.includes(rate)) return { ok: false, error: 'GST rate must be 0, 5, 12, 18 or 28%.' };
+    if (!GST_MODES.includes(input.gstMode)) return { ok: false, error: 'Choose your GST status.' };
+    const registered = input.gstMode !== 'unregistered';
+    const gstin = cleanGstin(input.gstin) || null;
+    if (registered && !gstin) return { ok: false, error: 'Enter your GSTIN. It’s printed on every bill once you’re registered.' };
+    if (gstin && !GSTIN_RE.test(gstin)) return { ok: false, error: 'GSTIN should be 15 characters, like 19ABCDE1234F1Z5.' };
+    const state = stateByName(input.state);
+    if (!state) return { ok: false, error: 'Choose your state from the list.' };
+    if (registered && gstin && stateByCode(gstin.slice(0, 2)) && gstin.slice(0, 2) !== state.code) {
+      return { ok: false, error: `Your GSTIN starts with ${gstin.slice(0, 2)} (${stateByCode(gstin.slice(0, 2))!.name}), but the state is ${state.name}. Check both.` };
+    }
     const prefix = (input.invoicePrefix ?? '').trim().toUpperCase();
     if (!/^[A-Z0-9]{1,6}$/.test(prefix)) return { ok: false, error: 'Bill number prefix: 1 to 6 letters or numbers, like GS or INV.' };
     must(await ctx.supabase.from('salons').update({
-      prices_include_tax: !!input.pricesIncludeTax, default_gst_rate: rate, invoice_prefix: prefix,
+      gst_mode: input.gstMode,
+      // An unregistered salon's old GSTIN is kept (it isn't printed) so switching back doesn't lose it.
+      gstin: gstin ?? (registered ? null : ctx.salon.gstin),
+      state: state.name,
+      prices_include_tax: !!input.pricesIncludeTax, invoice_prefix: prefix,
     }).eq('id', ctx.salon.id));
     refresh();
-    return { ok: true, message: 'Billing settings saved' };
+    return { ok: true, message: input.gstMode === ctx.salon.gst_mode ? 'Billing settings saved' : 'GST status saved. New bills use it from now on.' };
   } catch (e) { return fail(e); }
 }
 

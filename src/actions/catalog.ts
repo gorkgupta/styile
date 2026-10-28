@@ -4,12 +4,15 @@ import { getSalonContext } from '@/lib/context';
 import { can } from '@/lib/permissions';
 import { fail, must } from '@/lib/actions';
 import { round2 } from '@/lib/billing';
+import { isSacCode } from '@/lib/gst';
 import type { ActionResult, Service } from '@/lib/types';
 
 // Service menu: categories and services. Services are never deleted — past appointments and
 // bills point at them — so "removing" one archives it (active = false).
 
-const GST_RATES = [0, 5, 12, 18, 28];
+// Salon services follow the statutory rate (5% since 22 Sep 2025). The only override offered is 0% (exempt, on a CA's
+// advice); a rate the database still holds from before (e.g. 12%) may be kept unchanged but not newly chosen.
+const SERVICE_GST_OVERRIDES = [0];
 const GENDERS: Service['gender'][] = ['unisex', 'female', 'male'];
 const NOT_ALLOWED = 'Only the owner or a manager can change the service menu.';
 
@@ -65,8 +68,10 @@ export interface ServiceInput {
   categoryId: string | null;
   durationMin: number;
   price: number;
-  /** null = use the salon's default GST rate */
+  /** null = the statutory rate for salon services (5% since 22 Sep 2025); 0 = exempt */
   gstRate: number | null;
+  /** SAC: 999721 hair, 999722 cosmetic treatments, 999723 spa & massage, 999729 other beauty */
+  sacCode?: string;
   gender: Service['gender'];
   description?: string | null;
   onlineBookable: boolean;
@@ -84,7 +89,14 @@ export async function saveService(input: ServiceInput): Promise<ActionResult<{ i
     if (name.length > 80) return { ok: false, error: 'Keep the service name under 80 characters.' };
     if (!Number.isFinite(duration) || duration < 5 || duration > 600) return { ok: false, error: 'Duration must be between 5 minutes and 10 hours.' };
     if (!Number.isFinite(price) || price < 0 || price > 1000000) return { ok: false, error: 'Enter a price between ₹0 and ₹10,00,000.' };
-    if (input.gstRate !== null && !GST_RATES.includes(Number(input.gstRate))) return { ok: false, error: 'GST rate must be 0, 5, 12, 18 or 28%.' };
+    const sacCode = input.sacCode ?? '999721';
+    if (!isSacCode(sacCode)) return { ok: false, error: 'Choose the kind of service (hair, beauty, spa or other) for the GST code.' };
+    let keepOldRate = false;
+    if (input.gstRate !== null && !SERVICE_GST_OVERRIDES.includes(Number(input.gstRate))) {
+      const old = input.id ? await ctx.supabase.from('services').select('gst_rate').eq('id', input.id).eq('salon_id', ctx.salon.id).maybeSingle() : null;
+      keepOldRate = old?.data?.gst_rate != null && Number(old.data.gst_rate) === Number(input.gstRate);
+      if (!keepOldRate) return { ok: false, error: 'Salon services are taxed at the standard rate (5% since 22 September 2025). Choose “Standard rate” unless your CA says the service is exempt.' };
+    }
     if (!GENDERS.includes(input.gender)) return { ok: false, error: 'Choose who this service is for.' };
     const description = (input.description ?? '').trim();
     if (description.length > 500) return { ok: false, error: 'Keep the description under 500 characters.' };
@@ -98,7 +110,7 @@ export async function saveService(input: ServiceInput): Promise<ActionResult<{ i
 
     const row = {
       name, category_id: input.categoryId || null, duration_min: duration, price,
-      gst_rate: input.gstRate === null ? null : Number(input.gstRate), gender: input.gender,
+      gst_rate: input.gstRate === null ? null : Number(input.gstRate), sac_code: sacCode, gender: input.gender,
       description: description || null, online_bookable: !!input.onlineBookable, active: input.active ?? true,
     };
     if (input.id) {

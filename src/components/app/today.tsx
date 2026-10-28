@@ -12,7 +12,7 @@ import { fmtDateLong, fmtTime } from '@/lib/time';
 import type { AppointmentFull } from '@/lib/types';
 
 export interface TodayProps {
-  salon: { id: string; name: string; slug: string; waConnected: boolean; gstin: string | null };
+  salon: { id: string; name: string; slug: string; waConnected: boolean; gstin: string | null; gstMode?: 'unregistered' | 'composition' | 'regular' };
   userName: string;
   today: string;
   nowIso: string;
@@ -55,7 +55,8 @@ export function TodayView(p: TodayProps) {
   const bookingUrl = rootDomain() ? salonUrl(p.salon.slug) : typeof window !== 'undefined' ? `${window.location.origin}/s/${p.salon.slug}` : `/s/${p.salon.slug}`;
   const setupSteps = [
     { done: p.teamSize > 1, label: 'Add your stylists', href: '/app/staff' },
-    { done: !!p.salon.gstin, label: 'Add GST details for invoices', href: '/app/settings' },
+    // Unregistered salons are done (they chose it at sign-up); registered ones need their GSTIN on bills.
+    { done: p.salon.gstMode === 'unregistered' || !!p.salon.gstin, label: 'Set your GST status for bills', href: '/app/settings#billing' },
     { done: p.salon.waConnected, label: 'Connect your WhatsApp number', href: '/app/settings#whatsapp' },
   ];
   const showSetup = p.isOwner && (p.welcome || setupSteps.some((s) => !s.done));

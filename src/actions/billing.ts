@@ -4,6 +4,7 @@ import { getSalonContext } from '@/lib/context';
 import { fail, must } from '@/lib/actions';
 import { can } from '@/lib/permissions';
 import { notifyInvoice } from '@/lib/whatsapp/outbox';
+import { BUSINESS_GSTIN_RE, cleanGstin, GST_SLABS, HSN_RE } from '@/lib/gst';
 import type { ActionResult, PayMethod } from '@/lib/types';
 
 const METHODS: PayMethod[] = ['cash', 'upi', 'card', 'wallet', 'other'];
@@ -16,7 +17,10 @@ export interface BillItemInput {
   qty: number;
   unitPrice: number;
   discount: number;
+  /** Products: the rate chosen (required for regular GST). Services: ignored — the database uses the menu/statutory rate. */
   gstRate?: number | null;
+  /** HSN for products (4, 6 or 8 digits), optional. */
+  code?: string | null;
 }
 
 export interface BillPaymentInput { method: PayMethod; amount: number; reference?: string }
@@ -28,6 +32,9 @@ export interface CreateInvoiceInput {
   payments: BillPaymentInput[];
   notes?: string;
   sendOnWhatsApp?: boolean;
+  /** Business client's GSTIN and address (tax invoices only). */
+  clientGstin?: string | null;
+  clientAddress?: string | null;
 }
 
 function refresh() { revalidatePath('/app', 'layout'); }
@@ -46,7 +53,13 @@ export async function createInvoice(input: CreateInvoiceInput): Promise<ActionRe
       if (!finite(i.unitPrice) || i.unitPrice < 0) return { ok: false, error: `Enter a price for “${i.name}”.` };
       if (!finite(i.discount) || i.discount < 0) return { ok: false, error: `Discount on “${i.name}” can’t be negative.` };
       if (i.discount > i.qty * i.unitPrice) return { ok: false, error: `Discount on “${i.name}” is more than its price.` };
+      if (i.gstRate != null && !(GST_SLABS as readonly number[]).includes(i.gstRate)) return { ok: false, error: `GST on “${i.name}” must be 0, 5, 12, 18 or 28%.` };
+      if (i.code && !HSN_RE.test(i.code.trim())) return { ok: false, error: `HSN code for “${i.name}” should be 4, 6 or 8 digits, like 3305.` };
     }
+    const clientGstin = cleanGstin(input.clientGstin) || null;
+    if (clientGstin && salon.gst_mode !== 'regular') return { ok: false, error: 'A client GSTIN goes on tax invoices only. Set your GST status in Settings.' };
+    if (clientGstin && !BUSINESS_GSTIN_RE.test(clientGstin)) return { ok: false, error: 'Client GSTIN should be 15 characters, like 19ABCDE1234F1Z5.' };
+    const clientAddress = (input.clientAddress ?? '').trim().replace(/\s+/g, ' ').slice(0, 240) || null;
     const payments = (input.payments ?? []).filter((p) => finite(p.amount) && p.amount > 0);
     for (const p of payments) if (!METHODS.includes(p.method)) return { ok: false, error: 'Pick a payment method.' };
 
@@ -56,6 +69,8 @@ export async function createInvoice(input: CreateInvoiceInput): Promise<ActionRe
         customer_id: input.customerId || null,
         appointment_id: input.appointmentId || null,
         notes: input.notes?.trim() || null,
+        client_gstin: clientGstin,
+        client_address: clientAddress,
         items: items.map((i) => ({
           kind: i.kind,
           service_id: i.kind === 'service' ? i.serviceId || null : null,
@@ -64,7 +79,8 @@ export async function createInvoice(input: CreateInvoiceInput): Promise<ActionRe
           qty: i.qty,
           unit_price: i.unitPrice,
           discount: i.discount,
-          gst_rate: i.gstRate ?? null,
+          gst_rate: i.kind === 'service' ? null : i.gstRate ?? null,
+          code: i.kind === 'service' ? null : i.code?.trim() || null,
         })),
         payments: payments.map((p) => ({ method: p.method, amount: p.amount, reference: p.reference?.trim() || null })),
       },

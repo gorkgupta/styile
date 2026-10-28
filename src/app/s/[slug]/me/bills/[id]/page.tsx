@@ -6,7 +6,7 @@ import { phoneFromAuth } from '@/lib/phone';
 import { BillView, type CustomerBill } from '@/components/portal/bill-view';
 import { findSiteSalon } from '@/lib/salon-site';
 import { salonSiteBase } from '@/lib/site';
-import type { InvoiceStatus, PayMethod } from '@/lib/types';
+import type { BillType, InvoiceStatus, PayMethod } from '@/lib/types';
 
 export const metadata: Metadata = { title: 'Your bill' };
 export const dynamic = 'force-dynamic';
@@ -28,24 +28,28 @@ export default async function Page({ params }: { params: Promise<{ slug: string;
 
   // RLS: a client can read their own invoices, their lines, and the salon. Anything else returns nothing -> 404.
   const { data: inv } = await supabase.from('invoices')
-    .select('id, salon_id, invoice_no, created_at, status, prices_include_tax, subtotal, discount_total, taxable_total, cgst, sgst, igst, round_off, total, paid_total, customer:customers(name, phone), salon:salons(name, legal_name, gstin, address, city, state, pincode, phone, slug, timezone)')
+    .select('id, salon_id, invoice_no, created_at, status, prices_include_tax, subtotal, discount_total, taxable_total, cgst, sgst, igst, round_off, total, paid_total, bill_type, seller_gstin, place_of_supply, client_gstin, client_address, customer:customers(name, phone), salon:salons(name, legal_name, gstin, address, city, state, pincode, phone, slug, timezone)')
     .eq('id', id).eq('salon_id', site.id).maybeSingle();
   if (!inv) notFound();
   const row = inv as unknown as {
     id: string; salon_id: string; invoice_no: string; created_at: string; status: InvoiceStatus; prices_include_tax: boolean;
     subtotal: number; discount_total: number; taxable_total: number; cgst: number; sgst: number; igst: number; round_off: number; total: number; paid_total: number;
+    bill_type: BillType; seller_gstin: string | null; place_of_supply: string | null; client_gstin: string | null; client_address: string | null;
     customer: { name: string; phone: string } | null;
     salon: { name: string; legal_name: string | null; gstin: string | null; address: string | null; city: string | null; state: string | null; pincode: string | null; phone: string | null; slug: string; timezone: string } | null;
   };
   if (!row.salon) notFound();
 
   const [{ data: items }, { data: pays }] = await Promise.all([
-    supabase.from('invoice_items').select('id, name, qty, unit_price, discount, gst_rate, line_total, staff_id').eq('invoice_id', id).order('sort'),
+    supabase.from('invoice_items').select('id, name, kind, code, qty, unit_price, discount, gst_rate, taxable, tax, line_total, staff_id').eq('invoice_id', id).order('sort'),
     // Clients have no RLS access to payments; the invoice read above already proved this bill is theirs.
     createAdminClient().from('payments').select('method, amount').eq('invoice_id', id).order('created_at'),
   ]);
   // Nor to staff rows: stylist names for this bill's lines come from the service role, limited to the bill's salon.
-  type ItemRow = { id: string; name: string; qty: number; unit_price: number; discount: number; gst_rate: number; line_total: number; staff_id: string | null };
+  type ItemRow = {
+    id: string; name: string; kind: 'service' | 'product' | 'custom'; code: string | null; qty: number; unit_price: number; discount: number;
+    gst_rate: number; taxable: number; tax: number; line_total: number; staff_id: string | null;
+  };
   const itemRows = (items ?? []) as ItemRow[];
   const staffIds = [...new Set(itemRows.map((i) => i.staff_id).filter((x): x is string => !!x))];
   const stylists = new Map<string, string>();
@@ -63,10 +67,14 @@ export default async function Page({ params }: { params: Promise<{ slug: string;
       invoice_no: row.invoice_no, created_at: row.created_at, status: row.status, prices_include_tax: row.prices_include_tax,
       subtotal: Number(row.subtotal), discount_total: Number(row.discount_total), taxable_total: Number(row.taxable_total), cgst: Number(row.cgst),
       sgst: Number(row.sgst), igst: Number(row.igst), round_off: Number(row.round_off), total: Number(row.total), paid_total: Number(row.paid_total),
+      bill_type: row.bill_type, seller_gstin: row.seller_gstin, place_of_supply: row.place_of_supply, client_gstin: row.client_gstin, client_address: row.client_address,
     },
     customer: row.customer,
     items: itemRows
-      .map((i) => ({ id: i.id, name: i.name, qty: Number(i.qty), unit_price: Number(i.unit_price), discount: Number(i.discount), gst_rate: Number(i.gst_rate), line_total: Number(i.line_total), stylist: (i.staff_id && stylists.get(i.staff_id)) || null })),
+      .map((i) => ({
+        id: i.id, name: i.name, kind: i.kind, code: i.code, qty: Number(i.qty), unit_price: Number(i.unit_price), discount: Number(i.discount),
+        gst_rate: Number(i.gst_rate), taxable: Number(i.taxable), tax: Number(i.tax), line_total: Number(i.line_total), stylist: (i.staff_id && stylists.get(i.staff_id)) || null,
+      })),
     payments: ((pays ?? []) as { method: PayMethod; amount: number }[]).map((p) => ({ method: p.method, amount: Number(p.amount) })),
   };
   const phone = phoneFromAuth(auth.user.phone) ?? undefined;

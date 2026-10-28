@@ -12,7 +12,9 @@ import { PhoneInput } from '@/components/ui/phone-input';
 import { PLAN_LABEL, PLAN_STATUS_LABEL, planById } from '@/lib/plans';
 import { money } from '@/lib/billing';
 import { checkCoinPacks, DEFAULT_COIN_PACKS, fmtCoins, MAX_COIN_PACKS } from '@/lib/coins';
-import type { ActionResult, Hours, Salon } from '@/lib/types';
+import { cleanGstin, COMPOSITION_RATE, DEFAULT_STATE, GSTIN_RE, INDIAN_STATES, serviceGstRate, stateByCode, stateByName } from '@/lib/gst';
+import { localDate } from '@/lib/time';
+import type { ActionResult, GstMode, Hours, Salon } from '@/lib/types';
 
 export interface SettingsProps {
   salon: Salon;
@@ -22,10 +24,6 @@ export interface SettingsProps {
 }
 
 const NOTES_MAX = 1500;
-const STATES = ['Andaman and Nicobar Islands', 'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chandigarh', 'Chhattisgarh',
-  'Dadra and Nagar Haveli and Daman and Diu', 'Delhi', 'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jammu and Kashmir', 'Jharkhand',
-  'Karnataka', 'Kerala', 'Ladakh', 'Lakshadweep', 'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram', 'Nagaland', 'Odisha',
-  'Puducherry', 'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura', 'Uttar Pradesh', 'Uttarakhand', 'West Bengal'];
 
 const SECTIONS: { id: string; label: string; icon: IconName }[] = [
   { id: 'profile', label: 'Salon profile', icon: 'store' },
@@ -123,8 +121,8 @@ export function SettingsScreen({ salon, hours, supportEmail }: SettingsProps) {
 
 function ProfileSection({ salon }: { salon: Salon }) {
   const [f, setF] = useState({
-    name: salon.name, legalName: salon.legal_name ?? '', gstin: salon.gstin ?? '', phone: salon.phone ? formatPhone(salon.phone) : '',
-    email: salon.email ?? '', address: salon.address ?? '', city: salon.city ?? '', state: salon.state ?? '', pincode: salon.pincode ?? '',
+    name: salon.name, legalName: salon.legal_name ?? '', phone: salon.phone ? formatPhone(salon.phone) : '',
+    email: salon.email ?? '', address: salon.address ?? '', city: salon.city ?? '', pincode: salon.pincode ?? '',
   });
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF((x) => ({ ...x, [k]: e.target.value }));
   const { pending, error, run } = useSave();
@@ -137,58 +135,116 @@ function ProfileSection({ salon }: { salon: Salon }) {
           <TextField label="Legal / business name" hint="As registered for GST, if different" value={f.legalName} onChange={set('legalName')} maxLength={120} />
         </div>
         <div className="grid-2">
-          <TextField label="GSTIN" value={f.gstin} placeholder="29ABCDE1234F1Z5" maxLength={15} className="mono-upper"
-            onChange={(e) => setF((x) => ({ ...x, gstin: e.target.value.toUpperCase().replace(/\s/g, '') }))}
-            hint="Leave blank if you aren’t GST registered — bills will say “Bill of supply”." />
-          <div className="grid-2 tight">
-            <PhoneInput label="Phone" value={f.phone} onChange={(v) => setF((x) => ({ ...x, phone: v }))} />
-            <TextField label="Email" type="email" value={f.email} onChange={set('email')} />
-          </div>
+          <PhoneInput label="Phone" value={f.phone} onChange={(v) => setF((x) => ({ ...x, phone: v }))} />
+          <TextField label="Email" type="email" value={f.email} onChange={set('email')} />
         </div>
         <TextField label="Address" value={f.address} onChange={set('address')} placeholder="Shop no., building, street, area" maxLength={240} />
         <div className="grid-3">
           <TextField label="City" value={f.city} onChange={set('city')} />
-          <SelectField label="State" value={f.state} onChange={set('state')}>
-            <option value="">Choose…</option>
-            {!STATES.includes(f.state) && f.state && <option value={f.state}>{f.state}</option>}
-            {STATES.map((s) => <option key={s} value={s}>{s}</option>)}
-          </SelectField>
           <TextField label="PIN code" inputMode="numeric" maxLength={6} value={f.pincode} onChange={set('pincode')} />
+          <div className="field">
+            <span className="label">State</span>
+            <span className="small ink2 settings-static">{salon.state || DEFAULT_STATE} <a href="#billing" className="small">Change under Billing &amp; GST</a></span>
+          </div>
         </div>
       </div>
     </Section>
   );
 }
 
+const GST_CHOICES: { mode: GstMode; title: string; body: string; prints: string }[] = [
+  { mode: 'unregistered', title: 'Not registered', prints: 'Bill',
+    body: 'Sales under ₹20 lakh a year and no GSTIN. Your bills show no GST — you must not charge any.' },
+  { mode: 'composition', title: 'Composition scheme', prints: 'Bill of Supply',
+    body: `You pay ${COMPOSITION_RATE}% of your sales to the government yourself. Clients pay no GST on your bills.` },
+  { mode: 'regular', title: 'Regular GST', prints: 'Tax Invoice',
+    body: 'You charge clients GST: 5% on services, and 5% or 18% on products. Bills show CGST and SGST.' },
+];
+
 function BillingSection({ salon }: { salon: Salon }) {
+  const [mode, setMode] = useState<GstMode>(salon.gst_mode ?? (salon.gstin ? 'regular' : 'unregistered'));
+  const [gstin, setGstin] = useState(salon.gstin ?? '');
+  const [state, setState] = useState(stateByName(salon.state)?.name ?? (salon.state || DEFAULT_STATE));
   const [inclusive, setInclusive] = useState(salon.prices_include_tax);
-  const [rate, setRate] = useState(String(Number(salon.default_gst_rate)));
   const [prefix, setPrefix] = useState(salon.invoice_prefix);
   const { pending, error, run } = useSave();
+  const registered = mode !== 'unregistered';
+  const rate = serviceGstRate(localDate(new Date(), salon.timezone));
   const example = 1000;
-  const r = Number(rate);
+  const g = cleanGstin(gstin);
+  const gstinState = g.length >= 2 ? stateByCode(g.slice(0, 2)) : null;
+  const chosen = stateByName(state);
+  const gstinNote = !registered ? null
+    : !g ? 'Printed on every bill. Your GST certificate has it.'
+    : !GSTIN_RE.test(g) ? 'A GSTIN has 15 letters and numbers, like 19ABCDE1234F1Z5.'
+    : gstinState && chosen && gstinState.code !== chosen.code ? `This GSTIN is from ${gstinState.name} (${gstinState.code}), but your state is ${chosen.name}.`
+    : `Registered in ${gstinState?.name ?? chosen?.name ?? 'your state'}.`;
   const exampleText = inclusive
-    ? `A ${money(example)} service is billed at ${money(example)} (${money(Math.round((example * 100) / (100 + r) * 100) / 100)} + GST).`
-    : `A ${money(example)} service is billed at ${money(example + (example * r) / 100)} including ${r}% GST.`;
+    ? `A ${money(example)} haircut is billed at ${money(example)} (${money(Math.round((example * 10000) / (100 + rate)) / 100)} + ${rate}% GST).`
+    : `A ${money(example)} haircut is billed at ${money(example + (example * rate) / 100)} including ${rate}% GST.`;
+  const save = () => run(() => updateBilling({ gstMode: mode, gstin: registered ? g : null, state, pricesIncludeTax: inclusive, invoicePrefix: prefix }));
+
   return (
-    <Section id="billing" title="Billing & GST" description="How prices and tax appear on your bills."
-      footer={<SaveBar pending={pending} error={error} onSave={() => run(() => updateBilling({ pricesIncludeTax: inclusive, defaultGstRate: Number(rate), invoicePrefix: prefix }))} />}>
+    <Section id="billing" title="Billing & GST" description="Which bill you give clients, and how tax appears on it."
+      footer={<SaveBar pending={pending} error={error} onSave={save} />}>
       <div className="stack">
-        <div className="setting-row">
-          <div className="grow">
-            <div className="strong">Menu prices include GST</div>
-            <div className="small muted">{exampleText}</div>
-          </div>
-          <Switch checked={inclusive} onChange={setInclusive} label={<span className="sr-only">Menu prices include GST</span>} />
-        </div>
+        <fieldset className="choice-cards">
+          <legend className="label">GST status</legend>
+          {GST_CHOICES.map((c) => (
+            <label key={c.mode} className={`choice-card${mode === c.mode ? ' is-on' : ''}`}>
+              <input type="radio" name="gst-mode" value={c.mode} checked={mode === c.mode} onChange={() => setMode(c.mode)} />
+              <span className="choice-body">
+                <span className="strong">{c.title}</span>
+                <span className="small ink2">{c.body}</span>
+                <span className="choice-tag">Bills say “{c.prints}”</span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+        {mode === 'composition' && (
+          <p className="small ink2">
+            Bills of supply carry the line “Composition taxable person, not eligible to collect tax on supplies”. Reports show an estimate of the {COMPOSITION_RATE}% you owe.
+            {' '}On a {money(example)} haircut that’s about {money((example * COMPOSITION_RATE) / 100)} from your pocket; on regular GST the client pays {money((example * rate) / 100)} instead.
+          </p>
+        )}
         <div className="grid-2">
-          <SelectField label="Default GST rate" value={rate} onChange={(e) => setRate(e.target.value)} hint="Salon services are usually 18%. You can override it per service.">
-            {[0, 5, 12, 18, 28].map((x) => <option key={x} value={x}>{x}%</option>)}
+          {registered ? (
+            <TextField label="GSTIN" value={gstin} placeholder="19ABCDE1234F1Z5" maxLength={15} className="mono-upper"
+              onChange={(e) => setGstin(e.target.value.toUpperCase().replace(/\s/g, ''))}
+              hint={<span className={gstinNote?.startsWith('This GSTIN') || (g && !GSTIN_RE.test(g)) ? 'warn-text' : undefined}>{gstinNote}</span>} />
+          ) : null}
+          <SelectField label="State" value={state} onChange={(e) => setState(e.target.value)}
+            hint={mode === 'regular' ? 'Printed as the place of supply. Clients from Bhutan or other states served here are still billed CGST + SGST.' : 'Printed in your address.'}>
+            {!chosen && state && <option value={state}>{state}</option>}
+            {INDIAN_STATES.map((s) => <option key={s.code} value={s.name}>{s.name} ({s.code})</option>)}
           </SelectField>
-          <TextField label="Bill number prefix" value={prefix} maxLength={6} className="mono-upper"
-            onChange={(e) => setPrefix(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
-            hint={<>Next bill: <span className="num strong ink2">{(prefix || 'INV')}-{String(salon.next_invoice_no).padStart(5, '0')}</span></>} />
+          {!registered && (
+            <TextField label="Bill number prefix" value={prefix} maxLength={6} className="mono-upper"
+              onChange={(e) => setPrefix(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+              hint={<>Next bill: <span className="num strong ink2">{(prefix || 'INV')}-{String(salon.next_invoice_no).padStart(5, '0')}</span></>} />
+          )}
         </div>
+        {registered && (
+          <div className="grid-2">
+            <TextField label="Bill number prefix" value={prefix} maxLength={6} className="mono-upper"
+              onChange={(e) => setPrefix(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+              hint={<>Next bill: <span className="num strong ink2">{(prefix || 'INV')}-{String(salon.next_invoice_no).padStart(5, '0')}</span> · numbers run in order, never repeat</>} />
+            <div className="hide-mobile" />
+          </div>
+        )}
+        {mode === 'regular' && (
+          <div className="setting-row">
+            <div className="grow">
+              <div className="strong">Menu prices include GST</div>
+              <div className="small muted">{exampleText}</div>
+            </div>
+            <Switch checked={inclusive} onChange={setInclusive} label={<span className="sr-only">Menu prices include GST</span>} />
+          </div>
+        )}
+        <Notice>
+          <span><strong>Confirm with your CA.</strong> Styile follows the GST rules as we understand them: salon services at 5% since 22 September 2025,
+            retail products at their own rate (5% or 18%), registration from ₹20 lakh a year. We aren’t tax advisers — check your GST status, product rates and bill format with your CA.</span>
+        </Notice>
       </div>
     </Section>
   );

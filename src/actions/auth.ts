@@ -7,6 +7,7 @@ import { isReservedSlug, rootDomain, salonUrl, SLUG_RE } from '@/lib/tenant';
 import { errorMessage } from '@/lib/actions';
 import { invalidPhoneMessage, normalizePhone } from '@/lib/phone';
 import { safeNextPath } from '@/lib/safe-next';
+import { cleanGstin, GSTIN_RE, stateByCode, stateByName } from '@/lib/gst';
 import type { ActionResult } from '@/lib/types';
 
 function safeNext(next: FormDataEntryValue | null, fallback: string) {
@@ -67,9 +68,17 @@ export async function createSalon(_: ActionResult | null, form: FormData): Promi
   if (!SLUG_RE.test(slug)) return { ok: false, error: 'Your salon address can use lowercase letters, numbers and dashes (3–40 characters).' };
   if (isReservedSlug(slug)) return { ok: false, error: `“${slug}” is reserved. Try your salon’s name, for example ${slug}-salon.` };
   if (phoneRaw && !phone) return { ok: false, error: invalidPhoneMessage(phoneRaw) };
+  const gstMode = String(form.get('gst_mode') || '');
+  if (!['unregistered', 'composition', 'regular'].includes(gstMode)) return { ok: false, error: 'Tell us whether your salon is GST registered. Choose “Not registered” if you aren’t sure — you can change it later.' };
+  const gstin = gstMode === 'unregistered' ? null : cleanGstin(String(form.get('gstin') || '')) || null;
+  if (gstMode !== 'unregistered' && !gstin) return { ok: false, error: 'Enter your GSTIN, or choose “Not registered”.' };
+  if (gstin && !GSTIN_RE.test(gstin)) return { ok: false, error: 'GSTIN should be 15 characters, like 19ABCDE1234F1Z5.' };
+  // The GSTIN's first two digits are the state it was issued in.
+  const state = stateByName(String(form.get('state') || '')) ?? stateByCode(gstin?.slice(0, 2));
   const { data, error } = await supabase.rpc('create_salon', {
     p_name: name, p_slug: slug, p_phone: phone, p_city: String(form.get('city') || '').trim() || null,
     p_owner_name: String(form.get('owner_name') || '').trim() || null, p_seed_menu: form.get('seed') !== 'off',
+    p_gst_mode: gstMode, p_gstin: gstin, p_state: state?.name ?? null,
   });
   if (error) return { ok: false, error: errorMessage(error) };
   (await cookies()).set(ACTIVE_SALON_COOKIE, (data as { id: string }).id, { path: '/', httpOnly: true, sameSite: 'lax', maxAge: 60 * 60 * 24 * 365 });

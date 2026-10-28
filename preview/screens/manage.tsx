@@ -8,7 +8,7 @@ import { branch, categories, conversations, messages, NOW_ISO, report as baseRep
 import { portraitOf, previewSkills, profiledStaff as staff } from '../stylist-data';
 import { coinReport, salonWithCoins } from '../coins-data';
 
-const salon = salonWithCoins;
+const salon = { ...salonWithCoins, gst_mode: 'regular' as const };
 const report = { ...baseReport, ...coinReport, by_method: { ...baseReport.by_method, wallet: 48760 } };
 
 // A couple of extra rows so the screens show archived / online-off / uncategorised states.
@@ -56,7 +56,7 @@ function OpenRow({ index, children }: { index: number; children: ReactNode }) {
 export const screens: Record<string, { title: string; render: () => ReactNode }> = {
   '/app/services': {
     title: 'Services',
-    render: () => <ServicesScreen services={menuServices} categories={categories} defaultGstRate={salon.default_gst_rate} pricesIncludeTax={salon.prices_include_tax} />,
+    render: () => <ServicesScreen services={menuServices} categories={categories} serviceRate={5} gstMode="regular" pricesIncludeTax={salon.prices_include_tax} />,
   },
   '/app/staff': { title: 'Team', render: () => team() },
   '/app/staff/edit': { title: 'Team — edit a stylist’s booking page profile', render: () => <OpenRow index={2}>{team()}</OpenRow> },
@@ -67,21 +67,21 @@ export const screens: Record<string, { title: string; render: () => ReactNode }>
   '/app/settings/not-connected': {
     title: 'Settings (WhatsApp not connected, trial)',
     render: () => (
-      <SettingsScreen salon={{ ...salon, wa_phone_number_id: null, wa_display_number: null, plan: 'trial', plan_status: 'trialing', trial_ends_at: '2026-11-07T18:29:00Z', gstin: null }}
+      <SettingsScreen salon={{ ...salon, wa_phone_number_id: null, wa_display_number: null, plan: 'trial', plan_status: 'trialing', trial_ends_at: '2026-11-07T18:29:00Z', gstin: null, gst_mode: 'unregistered' }}
         hours={branch.business_hours} supportEmail="support@styile.com" />
     ),
   },
   '/app/reports': {
     title: 'Reports',
     render: () => (
-      <ReportsScreen report={report} range={{ key: 'month', from: '2026-10-01', to: TODAY }} today={TODAY} salonName={salon.name}
+      <ReportsScreen report={report} range={{ key: 'month', from: '2026-10-01', to: TODAY }} today={TODAY} salonName={salon.name} gstMode="regular"
         previous={{ ...report, revenue: 341200, bills: 389, avg_bill: 877, new_clients: 71 }} />
     ),
   },
   '/app/reports/week': {
     title: 'Reports (last 7 days)',
     render: () => (
-      <ReportsScreen range={{ key: '7d', from: '2026-10-21', to: TODAY }} today={TODAY} salonName={salon.name} previous={null}
+      <ReportsScreen range={{ key: '7d', from: '2026-10-21', to: TODAY }} today={TODAY} salonName={salon.name} gstMode="regular" previous={null}
         report={{ ...report, revenue: 98400, collected: 98400, bills: 104, by_day: report.by_day.slice(20) }} />
     ),
   },

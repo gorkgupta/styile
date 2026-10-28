@@ -9,7 +9,8 @@ import { money } from '@/lib/billing';
 import { fmtCoins } from '@/lib/coins';
 import { daysInRange, eachDay, RANGE_PRESETS, rangeLabel, type ReportRange } from '@/lib/report-range';
 import { dayKeyOf, fmtDateShort } from '@/lib/time';
-import type { ApptStatus, BookingSource, PayMethod, SalonReport } from '@/lib/types';
+import { COMPOSITION_RATE, REGISTRATION_THRESHOLD } from '@/lib/gst';
+import type { ApptStatus, BookingSource, GstMode, PayMethod, SalonReport } from '@/lib/types';
 import { METHOD_LABEL, SOURCE_LABEL } from '@/lib/types';
 
 export interface ReportsProps {
@@ -19,6 +20,8 @@ export interface ReportsProps {
   range: ReportRange;
   today: string;
   salonName: string;
+  /** Decides the tax tile: GST collected (regular), composition estimate, or the ₹20 lakh threshold meter. */
+  gstMode: GstMode;
 }
 
 const n = (v: unknown) => Number(v ?? 0) || 0;
@@ -47,7 +50,7 @@ function Delta({ now, before, label }: { now: number; before: number | null; lab
   );
 }
 
-export function ReportsScreen({ report, previous, range, today, salonName }: ReportsProps) {
+export function ReportsScreen({ report, previous, range, today, salonName, gstMode }: ReportsProps) {
   const days = daysInRange(range.from, range.to);
   const prevLabel = range.key === 'today' ? 'yesterday' : range.key === 'yesterday' ? 'day before' : range.key === 'month' || range.key === 'lastmonth' ? 'previous month' : `previous ${days} days`;
   const series = useMemo(() => {
@@ -84,7 +87,9 @@ export function ReportsScreen({ report, previous, range, today, salonName }: Rep
           <StatTile label="Bills" value={n(report.bills).toLocaleString('en-IN')} delta={<Delta now={n(report.bills)} before={previous ? n(previous.bills) : null} label={prevLabel} />} />
           <StatTile label="Average bill" value={money(n(report.avg_bill))} delta={<Delta now={n(report.avg_bill)} before={previous ? n(previous.avg_bill) : null} label={prevLabel} />} />
           <StatTile label="New clients" value={n(report.new_clients).toLocaleString('en-IN')} delta={<Delta now={n(report.new_clients)} before={previous ? n(previous.new_clients) : null} label={prevLabel} />} />
-          <StatTile label="GST collected" value={money(n(report.tax))} sub="CGST + SGST on bills" />
+          {gstMode === 'regular' ? <StatTile label="GST collected" value={money(n(report.tax))} sub="CGST + SGST on tax invoices" />
+            : gstMode === 'composition' ? <StatTile label="Composition tax (est.)" value={money(Math.round(n(report.composition_tax)))} sub={`Payable by you · ${COMPOSITION_RATE}% of sales`} />
+            : <ThresholdTile turnover={n(report.fy_turnover)} fyFrom={report.fy_from} />}
         </div>
 
         {empty ? (
@@ -127,6 +132,30 @@ function StatTile({ label, value, sub, delta }: { label: string; value: string; 
       <div className="stat-label">{label}</div>
       <div className="stat-value">{value}</div>
       <div className="stat-sub">{delta ?? sub ?? ' '}</div>
+    </div>
+  );
+}
+
+/** Unregistered salons: how close this financial year's sales are to the ₹20 lakh GST registration limit. */
+function ThresholdTile({ turnover, fyFrom }: { turnover: number; fyFrom: string }) {
+  const share = turnover / REGISTRATION_THRESHOLD;
+  const tone = share >= 1 ? 'danger' : share >= 0.8 ? 'warn' : 'ok';
+  const since = /^\d{4}-\d{2}-\d{2}$/.test(fyFrom)
+    ? new Intl.DateTimeFormat('en-IN', { timeZone: 'UTC', day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(`${fyFrom}T00:00:00Z`))
+    : '1 April';
+  return (
+    <div className={`stat gst-meter is-${tone}`}>
+      <div className="stat-label">GST registration limit</div>
+      <div className="stat-value">{moneyShort(turnover)} <span className="gst-meter-of">of ₹20L</span></div>
+      <div className="meter" role="meter" aria-valuemin={0} aria-valuemax={REGISTRATION_THRESHOLD} aria-valuenow={Math.round(turnover)}
+        aria-label={`${money(Math.round(turnover))} of ₹20 lakh this financial year`}>
+        <span style={{ width: `${Math.min(share, 1) * 100}%` }} />
+      </div>
+      <div className="stat-sub">
+        {tone === 'danger' ? <span className="danger-text">Over ₹20 lakh · ask your CA about registering</span>
+          : tone === 'warn' ? <span className="warn-text">{Math.round(share * 100)}% used · talk to your CA</span>
+          : `Sales since ${since} (financial year)`}
+      </div>
     </div>
   );
 }

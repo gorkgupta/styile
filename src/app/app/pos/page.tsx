@@ -2,7 +2,8 @@ import { redirect } from 'next/navigation';
 import { PosScreen, type PosProps } from '@/components/app/pos';
 import { requirePermission } from '@/lib/context';
 import { getMenu, getTeam } from '@/lib/queries';
-import { fmtTime } from '@/lib/time';
+import { fmtTime, localDate } from '@/lib/time';
+import { serviceGstRate } from '@/lib/gst';
 import type { ClientLite } from '@/actions/appointments';
 
 export const metadata = { title: 'New bill' };
@@ -46,8 +47,9 @@ export default async function PosPage({ searchParams }: { searchParams: Promise<
   return (
     <PosScreen
       salon={{
+        gstMode: ctx.salon.gst_mode,
         pricesIncludeTax: ctx.salon.prices_include_tax,
-        defaultGstRate: Number(ctx.salon.default_gst_rate),
+        serviceRate: serviceGstRate(localDate(new Date(), ctx.salon.timezone)),
         waConnected: !!ctx.salon.wa_phone_number_id,
         nextInvoiceNo: `${ctx.salon.invoice_prefix}-${String(ctx.salon.next_invoice_no).padStart(5, '0')}`,
       }}

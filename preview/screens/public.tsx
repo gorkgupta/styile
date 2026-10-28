@@ -59,11 +59,13 @@ const portalProps: PortalProps = {
 const inv = invoices[0];
 const customerBill: CustomerBill = {
   salon: { name: salon.name, legalName: salon.legal_name, gstin: salon.gstin, address: salon.address, city: salon.city, state: salon.state, pincode: salon.pincode, phone: salon.phone, slug: salon.slug, timezone: salon.timezone },
-  invoice: { ...inv, total: 1350, subtotal: 1350, taxable_total: 1144.07, cgst: 102.97, sgst: 102.96, paid_total: 1350 },
+  // Regular GST, after 22 Sep 2025: services at 5%.
+  invoice: { ...inv, total: 1350, subtotal: 1450, discount_total: 100, taxable_total: 1285.71, cgst: 32.15, sgst: 32.14, paid_total: 1350,
+    bill_type: 'tax_invoice', seller_gstin: salon.gstin, place_of_supply: 'Karnataka (29)', client_gstin: null, client_address: null },
   customer: { name: 'Rohan Mehta', phone: '919811112222' },
   items: [
-    ...invoiceItems.map((i) => ({ id: i.id, name: i.name, qty: i.qty, unit_price: i.unit_price, discount: i.discount, gst_rate: i.gst_rate, line_total: i.line_total, stylist: 'Priya Nair' })),
-    { id: 'ii-2', name: 'Hair spa', qty: 1, unit_price: 1000, discount: 100, gst_rate: 18, line_total: 900, stylist: 'Priya Nair' },
+    ...invoiceItems.map((i) => ({ id: i.id, name: i.name, kind: i.kind, code: '999721', qty: i.qty, unit_price: i.unit_price, discount: i.discount, gst_rate: 5, taxable: 428.57, tax: 21.43, line_total: i.line_total, stylist: 'Priya Nair' })),
+    { id: 'ii-2', name: 'Hair spa', kind: 'service' as const, code: '999721', qty: 1, unit_price: 1000, discount: 100, gst_rate: 5, taxable: 857.14, tax: 42.86, line_total: 900, stylist: 'Priya Nair' },
   ],
   payments: [...payments.map((x) => ({ method: x.method, amount: x.amount })), { method: 'wallet', amount: 900 }],
 };
@@ -71,15 +73,17 @@ const customerBill: CustomerBill = {
 const daysFromNow = (n: number) => new Date(new Date(NOW_ISO).getTime() + n * 86400000).toISOString();
 const adminRow = (name: string, slug: string, city: string, plan: AdminSalonRow['plan'], status: AdminSalonRow['status'], extra: Partial<AdminSalonRow> = {}): AdminSalonRow => ({
   id: `sal-${slug}`, name, slug, city, plan, status, trialEndsAt: null, ownerEmail: `${slug.split('-')[0]}@gmail.com`, ownerName: null,
-  staffCount: 4, bookings30d: 120, whatsapp30d: 40, wa: null, bookingEnabled: true, createdAt: daysFromNow(-120), ...extra,
+  staffCount: 4, bookings30d: 120, whatsapp30d: 40, wa: null, bookingEnabled: true, createdAt: daysFromNow(-120), gstMode: 'regular', gstin: '29AABCK1234L1Z2', ...extra,
 });
 const adminSalons: AdminSalonRow[] = [
   adminRow('Glow Studio', 'glow-studio', 'Bengaluru', 'growth', 'active', { ownerEmail: 'asha@glowstudio.in', ownerName: 'Asha Rao', staffCount: 6, bookings30d: 482, whatsapp30d: 171, wa: { phoneNumberId: '1098765432', businessAccountId: '2233445566', displayNumber: '+91 98450 12345' }, createdAt: daysFromNow(-290) }),
   adminRow('Kutting Edge Unisex', 'kutting-edge', 'Bengaluru', 'starter', 'active', { staffCount: 3, bookings30d: 164, whatsapp30d: 22 }),
   adminRow('Saffron Salon Banjara Hills', 'saffron-banjara', 'Hyderabad', 'pro', 'active', { staffCount: 18, bookings30d: 1260, whatsapp30d: 610, ownerName: 'Ravi Kumar', wa: { phoneNumberId: '1033445566', businessAccountId: '9988776655', displayNumber: '+91 90000 44321' } }),
+  adminRow('Tashi Beauty Parlour', 'tashi-beauty', 'Jaigaon', 'starter', 'active', { staffCount: 2, bookings30d: 96, whatsapp30d: 41, gstMode: 'unregistered', gstin: null }),
+  adminRow('Dooars Unisex Salon', 'dooars-salon', 'Jaigaon', 'trial', 'trialing', { trialEndsAt: daysFromNow(9), staffCount: 4, bookings30d: 58, whatsapp30d: 12, gstMode: 'composition', gstin: '19AKQPT4821M1Z6', createdAt: daysFromNow(-5) }),
   adminRow('Mirror Mirror', 'mirror-mirror', 'Pune', 'trial', 'trialing', { trialEndsAt: daysFromNow(2), staffCount: 2, bookings30d: 18, whatsapp30d: 0, createdAt: daysFromNow(-12) }),
   adminRow('The Barber Room', 'barber-room', 'Mumbai', 'trial', 'trialing', { trialEndsAt: daysFromNow(6), staffCount: 5, bookings30d: 74, whatsapp30d: 31, createdAt: daysFromNow(-8), wa: { phoneNumberId: '1077889900', businessAccountId: '5544332211', displayNumber: '+91 98200 11223' } }),
-  adminRow('Lotus Salon & Spa', 'lotus-salon', 'Kochi', 'trial', 'trialing', { trialEndsAt: daysFromNow(11), staffCount: 1, bookings30d: 3, whatsapp30d: 0, createdAt: daysFromNow(-3) }),
+  adminRow('Lotus Salon & Spa', 'lotus-salon', 'Kochi', 'trial', 'trialing', { trialEndsAt: daysFromNow(11), staffCount: 1, bookings30d: 3, whatsapp30d: 0, createdAt: daysFromNow(-3), gstMode: 'unregistered', gstin: null }),
   adminRow('Bombay Hair Co.', 'bombay-hair', 'Mumbai', 'growth', 'past_due', { staffCount: 8, bookings30d: 301, whatsapp30d: 95 }),
   adminRow('Shringar Beauty Parlour', 'shringar', 'Jaipur', 'starter', 'suspended', { staffCount: 2, bookings30d: 0, whatsapp30d: 0 }),
   adminRow('Chennai Cuts', 'chennai-cuts', 'Chennai', 'starter', 'cancelled', { staffCount: 2, bookings30d: 0, whatsapp30d: 0, createdAt: daysFromNow(-400) }),

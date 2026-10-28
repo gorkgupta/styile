@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
+import { ServicesScreen } from '../../src/components/app/services';
 import { PosScreen } from '../../src/components/app/pos';
 import { InvoicesScreen, type InvoiceListRow } from '../../src/components/app/invoices';
 import { InvoiceDetail } from '../../src/components/app/invoice-detail';
@@ -6,8 +7,14 @@ import { CustomersScreen } from '../../src/components/app/customers';
 import { CustomerProfile, type ProfileAppointment, type ProfileInvoice } from '../../src/components/app/customer-profile';
 import { resolveRange } from '../../src/lib/periods';
 import type { Customer, Invoice, InvoiceItem, PayMethod, Payment } from '../../src/lib/types';
-import { appointments, categories, customers, invoices, NOW_ISO, salon, services, staff, TODAY, TZ } from '../data';
+import { appointments, categories, customers, invoices, NOW_ISO, services, staff, TODAY, TZ } from '../data';
 import { ananyaCoinHistory, ananyaCoins, coinPacks } from '../coins-data';
+import { SettingsScreen } from '../../src/components/app/settings';
+import { ReportsScreen } from '../../src/components/app/reports';
+import { BillView, type CustomerBill } from '../../src/components/portal/bill-view';
+import { b2bInvoice, bosInvoice, bosSalon, gstReports, jaigaonClients, plainInvoice, plainSalon, regularSalon, taxInvoice } from '../gst-data';
+import { branch } from '../data';
+import type { Salon } from '../../src/lib/types';
 
 // ---------- POS: checking out Lakshmi Menon's global colour with Meera ----------
 const lakshmiAppt = appointments.find((a) => a.customer_id === 'cu-7' && a.status === 'in_service')!;
@@ -25,25 +32,23 @@ const listRows: InvoiceListRow[] = invoices.map((inv, i) => {
   };
 });
 
-// ---------- Bill detail: a realistic multi-line bill with a discount and split payment ----------
-const detailItems: InvoiceItem[] = [
-  { id: 'd1', invoice_id: 'inv-1041', kind: 'service', service_id: 's-global', staff_id: 'st-meera', name: 'Global colour', qty: 1, unit_price: 3800, discount: 380, gst_rate: 18, taxable: 2898.31, tax: 521.69, line_total: 3420 },
-  { id: 'd2', invoice_id: 'inv-1041', kind: 'service', service_id: 's-blow', staff_id: 'st-priya', name: 'Wash & blow-dry', qty: 1, unit_price: 500, discount: 0, gst_rate: 18, taxable: 423.73, tax: 76.27, line_total: 500 },
-  { id: 'd3', invoice_id: 'inv-1041', kind: 'product', service_id: null, staff_id: null, name: 'Colour-protect shampoo 250 ml', qty: 2, unit_price: 649, discount: 0, gst_rate: 18, taxable: 1100, tax: 198, line_total: 1298 },
-];
-const detailInvoice: Invoice = {
-  ...invoices[1], id: 'inv-1041', invoice_no: 'GS-01041', customer_id: 'cu-7', subtotal: 5598, discount_total: 380,
-  taxable_total: 4422.04, cgst: 397.98, sgst: 397.98, igst: 0, round_off: 0, total: 5218, paid_total: 5218, status: 'paid',
-  notes: null, void_reason: null, created_at: '2026-10-27T06:42:00.000Z',
-};
-const detailPayments: Payment[] = [
-  { id: 'dp1', invoice_id: 'inv-1041', method: 'upi', amount: 4000, reference: 'UPI 6273 1842', created_at: '2026-10-27T06:43:00.000Z' },
-  { id: 'dp2', invoice_id: 'inv-1041', method: 'cash', amount: 1218, reference: null, created_at: '2026-10-27T06:43:00.000Z' },
-];
-const salonForBill = {
-  name: salon.name, legal_name: salon.legal_name, gstin: salon.gstin, phone: salon.phone, email: salon.email,
-  address: salon.address, city: salon.city, state: salon.state, pincode: salon.pincode, waConnected: true,
-};
+// ---------- Bill detail: a realistic multi-line tax invoice (5% services, 5% and 18% products) with a discount and split payment ----------
+const detailItems: InvoiceItem[] = taxInvoice.items;
+const detailInvoice: Invoice = taxInvoice.invoice;
+const detailPayments: Payment[] = taxInvoice.payments;
+const billSalon = (x: Salon) => ({
+  name: x.name, legal_name: x.legal_name, gstin: x.gstin, phone: x.phone, email: x.email,
+  address: x.address, city: x.city, state: x.state, pincode: x.pincode, waConnected: !!x.wa_phone_number_id,
+});
+const salonForBill = billSalon(regularSalon);
+const posSalon = (x: Salon) => ({ gstMode: x.gst_mode, pricesIncludeTax: x.prices_include_tax, serviceRate: 5, waConnected: !!x.wa_phone_number_id,
+  nextInvoiceNo: `${x.invoice_prefix}-${String(x.next_invoice_no).padStart(5, '0')}` });
+const customerBillOf = (x: Salon, b: typeof taxInvoice, customer: { name: string; phone: string } | null): CustomerBill => ({
+  salon: { name: x.name, legalName: x.legal_name, gstin: x.gstin, address: x.address, city: x.city, state: x.state, pincode: x.pincode, phone: x.phone, slug: x.slug, timezone: x.timezone },
+  invoice: b.invoice, customer,
+  items: b.items.map((i) => ({ ...i, stylist: i.staff_id ? staff.find((s) => s.id === i.staff_id)?.name ?? null : null })),
+  payments: b.payments.map((p) => ({ method: p.method, amount: p.amount })),
+});
 const staffNames = Object.fromEntries(staff.map((s) => [s.id, s.name]));
 
 // ---------- Clients ----------
@@ -56,7 +61,7 @@ const clientList: Customer[] = [
 
 const ananya = clientList[0];
 const coinsFor = (role: 'owner' | 'receptionist') => ({
-  salon: { name: salon.name, enabled: true, packs: coinPacks, waConnected: true },
+  salon: { name: regularSalon.name, enabled: true, packs: coinPacks, waConnected: true },
   history: ananyaCoinHistory, canSell: true, canBonus: role === 'owner', canAdjust: role === 'owner',
 });
 // Bill paid partly with coins
@@ -79,12 +84,22 @@ const profileBills: ProfileInvoice[] = [
   { id: 'inv-1020', invoice_no: 'GS-01020', created_at: '2026-07-19T09:30:00.000Z', total: 7500, paid_total: 7500, status: 'paid' },
 ];
 
+/** Opens the n-th service's edit sheet once rendered. */
+function OpenService({ index, children }: { index: number; children: ReactNode }) {
+  useEffect(() => { document.querySelectorAll<HTMLButtonElement>('.svc-main')[index]?.click(); }, [index]);
+  return <>{children}</>;
+}
+
 export const screens: Record<string, { title: string; render: () => ReactNode }> = {
+  '/app/services/edit-gst': {
+    title: 'Services — edit (SAC and GST)',
+    render: () => <OpenService index={7}><ServicesScreen services={services.map((x) => ({ ...x, sac_code: x.category_id === 'c-skin' ? '999722' : '999721' }))} categories={categories} serviceRate={5} gstMode="regular" pricesIncludeTax /></OpenService>,
+  },
   '/app/pos': {
     title: 'New bill',
     render: () => (
       <PosScreen
-        salon={{ pricesIncludeTax: salon.prices_include_tax, defaultGstRate: salon.default_gst_rate, waConnected: true, nextInvoiceNo: 'GS-01043' }}
+        salon={posSalon(regularSalon)}
         services={services} categories={categories} staff={staff}
         prefill={{
           appointmentId: lakshmiAppt.id,
@@ -94,6 +109,65 @@ export const screens: Record<string, { title: string; render: () => ReactNode }>
         }}
       />
     ),
+  },
+  '/app/pos/plain': {
+    title: 'New bill (Jaigaon parlour, not GST registered)',
+    render: () => (
+      <PosScreen salon={posSalon(plainSalon)} services={services} categories={categories} staff={staff}
+        prefill={{ appointmentId: null, customer: { id: 'cu-j2', name: 'Rinku Sharma', phone: '919733055502', visit_count: 6, last_visit_at: null }, lines: [
+          { serviceId: 's-cut-w', name: 'Haircut (ladies)', price: 250, staffId: null, gstRate: null },
+          { serviceId: 's-facial', name: 'Fruit facial', price: 600, staffId: null, gstRate: null },
+        ] }} />
+    ),
+  },
+  '/app/invoices/x1': {
+    title: 'Tax invoice (regular GST: 5% services, 5% + 18% products)',
+    render: () => (
+      <InvoiceDetail invoice={taxInvoice.invoice} items={taxInvoice.items} payments={taxInvoice.payments}
+        customer={{ id: lakshmi.id, name: lakshmi.name, phone: lakshmi.phone, email: 'lakshmi.menon@gmail.com' }}
+        salon={salonForBill} staffNames={staffNames} tz={TZ} canVoid />
+    ),
+  },
+  '/app/invoices/b2b': {
+    title: 'Tax invoice to a business client (client GSTIN)',
+    render: () => (
+      <InvoiceDetail invoice={b2bInvoice.invoice} items={b2bInvoice.items} payments={b2bInvoice.payments}
+        customer={{ id: 'cu-9', name: 'Meenakshi Sundaram', phone: '919176543210', email: null }}
+        salon={salonForBill} staffNames={staffNames} tz={TZ} canVoid />
+    ),
+  },
+  '/app/invoices/bos': {
+    title: 'Bill of supply (composition scheme)',
+    render: () => (
+      <InvoiceDetail invoice={bosInvoice.invoice} items={bosInvoice.items} payments={bosInvoice.payments}
+        customer={jaigaonClients['cu-j1']} salon={billSalon(bosSalon)} staffNames={staffNames} tz={TZ} canVoid />
+    ),
+  },
+  '/app/invoices/plain': {
+    title: 'Plain bill (not GST registered, part paid)',
+    render: () => (
+      <InvoiceDetail invoice={plainInvoice.invoice} items={plainInvoice.items} payments={plainInvoice.payments}
+        customer={jaigaonClients['cu-j2']} salon={billSalon(plainSalon)} staffNames={staffNames} tz={TZ} canVoid={false} />
+    ),
+  },
+  '/me/bills/x1': { title: 'Client bill (tax invoice)', render: () => <BillView bill={customerBillOf(regularSalon, taxInvoice, { name: lakshmi.name, phone: lakshmi.phone })} phone={lakshmi.phone} base="" /> },
+  '/me/bills/bos': { title: 'Client bill (bill of supply)', render: () => <BillView bill={customerBillOf(bosSalon, bosInvoice, { name: 'Sonam Lhamo', phone: '919733055501' })} phone="919733055501" base="" /> },
+  '/me/bills/plain': { title: 'Client bill (plain bill, balance due)', render: () => <BillView bill={customerBillOf(plainSalon, plainInvoice, { name: 'Rinku Sharma', phone: '919733055502' })} phone="919733055502" base="" /> },
+  '/app/settings/gst-plain': {
+    title: 'Settings — Billing & GST (not registered)',
+    render: () => <SettingsScreen salon={plainSalon} hours={branch.business_hours} supportEmail="support@styile.com" />,
+  },
+  '/app/settings/gst-bos': {
+    title: 'Settings — Billing & GST (composition)',
+    render: () => <SettingsScreen salon={bosSalon} hours={branch.business_hours} supportEmail="support@styile.com" />,
+  },
+  '/app/reports/plain': {
+    title: 'Reports (not registered: ₹20 lakh meter)',
+    render: () => <ReportsScreen report={gstReports.unregistered} previous={null} range={{ key: 'month', from: '2026-10-01', to: TODAY }} today={TODAY} salonName={plainSalon.name} gstMode="unregistered" />,
+  },
+  '/app/reports/bos': {
+    title: 'Reports (composition tax estimate)',
+    render: () => <ReportsScreen report={gstReports.composition} previous={null} range={{ key: 'month', from: '2026-10-01', to: TODAY }} today={TODAY} salonName={bosSalon.name} gstMode="composition" />,
   },
   '/app/invoices': {
     title: 'Bills',
@@ -147,7 +221,7 @@ export const screens: Record<string, { title: string; render: () => ReactNode }>
       const a = appointments.find((x) => x.customer_id === 'cu-1')!;
       return (
         <PosScreen
-          salon={{ pricesIncludeTax: salon.prices_include_tax, defaultGstRate: salon.default_gst_rate, waConnected: true, nextInvoiceNo: 'GS-01043' }}
+          salon={posSalon(regularSalon)}
           services={services} categories={categories} staff={staff}
           prefill={{
             appointmentId: a.id,

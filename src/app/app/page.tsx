@@ -31,7 +31,7 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
 
   return (
     <TodayView
-      salon={{ id: ctx.salon.id, name: ctx.salon.name, slug: ctx.salon.slug, waConnected: !!ctx.salon.wa_phone_number_id, gstin: ctx.salon.gstin }}
+      salon={{ id: ctx.salon.id, name: ctx.salon.name, slug: ctx.salon.slug, waConnected: !!ctx.salon.wa_phone_number_id, gstin: ctx.salon.gstin, gstMode: ctx.salon.gst_mode }}
       userName={ctx.user.name.split(' ')[0]}
       today={today}
       nowIso={now.toISOString()}
