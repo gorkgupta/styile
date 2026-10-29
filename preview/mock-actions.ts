@@ -5,8 +5,9 @@ import { handlers as billing } from './mocks/billing';
 import { handlers as manage } from './mocks/manage';
 import { handlers as publicSide } from './mocks/public';
 import { handlers as dayclose } from './mocks/dayclose';
+import { handlers as packages } from './mocks/packages';
 
-const all: Record<string, (...args: any[]) => any> = { ...core, ...billing, ...manage, ...publicSide, ...dayclose };
+const all: Record<string, (...args: any[]) => any> = { ...core, ...billing, ...manage, ...publicSide, ...dayclose, ...packages };
 
 export async function mockAction(name: string, ...args: unknown[]) {
   await new Promise((r) => setTimeout(r, 250));

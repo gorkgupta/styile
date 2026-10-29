@@ -16,6 +16,9 @@ import { createClient } from '@/lib/supabase/client';
 import { DateStrip, SlotGrid } from '@/components/public/date-strip';
 import { CoinHistoryList, type CoinRow } from '@/components/app/coin-history';
 import { coinsText, fmtCoins } from '@/lib/coins';
+import { PackageCard } from '@/components/app/client-packages';
+import { dayText, daysLeft, perksText } from '@/lib/packages';
+import type { ClientMembership, ClientPackage } from '@/lib/types';
 
 export interface PortalSalon {
   id: string; name: string; slug: string; city: string | null; phone: string | null;
@@ -46,6 +49,11 @@ export interface PortalProps {
   bills: PortalBill[];
   /** The client's coins at this salon (spendable only here). */
   coins?: { balance: number; history: CoinRow[] };
+  /** Packages with sessions left, and the membership card (current, or a renewal that starts later). */
+  packages?: ClientPackage[];
+  membership?: ClientMembership | null;
+  /** The salon's local date. */
+  today?: string;
 }
 
 /** Simple top bar shared by the client portal pages. */
@@ -102,6 +110,32 @@ export function PortalHome(p: PortalProps) {
                   : 'Top up at the front desk to pay for your next visits with coins.'}
               </div>
             </div>
+          </section>
+        )}
+
+        {p.known && p.membership && (
+          <section className="pt-member" aria-label="Your membership">
+            <span className="pt-member-icon" aria-hidden><Icon name="idcard" size={22} /></span>
+            <div className="grow" style={{ minWidth: 0 }}>
+              <div className="strong">{p.membership.name} member</div>
+              <div className="small muted">
+                {perksText(p.membership)} on every bill ·{' '}
+                {p.today && p.membership.starts_on > p.today ? `starts ${dayText(p.membership.starts_on, p.today)}` : `valid till ${dayText(p.membership.ends_on, p.today)}`}
+                {p.today && p.membership.starts_on <= p.today && daysLeft(p.membership.ends_on, p.today) <= 30 ? ' · renew at the desk' : ''}
+              </div>
+            </div>
+          </section>
+        )}
+
+        {p.known && !!p.packages?.length && (
+          <section className="stack" aria-label="Your packages">
+            <h2>Your packages</h2>
+            <div className="panel pt-pk">
+              <ul className="list">
+                {p.packages.map((x) => <li key={x.id}><PackageCard pkg={x} today={p.today ?? x.expires_on} tz={p.salon.timezone} compact /></li>)}
+              </ul>
+            </div>
+            <p className="tiny muted">Tell the desk you’d like to use your package. Sessions can be used only at {p.salon.name}, by the date shown.</p>
           </section>
         )}
 

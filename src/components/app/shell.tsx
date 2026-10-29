@@ -39,6 +39,7 @@ export function AppShell(props: ShellProps) {
     { href: '/app/reports', label: 'Reports', icon: 'chart', perm: 'viewReports' },
     { href: '/app/expenses', label: 'Expenses', icon: 'expense', perm: 'addExpense' },
     { href: '/app/services', label: 'Services', icon: 'scissors', perm: 'manageMenu' },
+    { href: '/app/packages', label: 'Packages', icon: 'box', perm: 'manageMenu' },
     { href: '/app/staff', label: 'Team', icon: 'user', perm: 'manageStaff' },
     { href: '/app/settings', label: 'Settings', icon: 'settings', perm: 'settings' },
   ];

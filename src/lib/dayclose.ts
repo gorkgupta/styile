@@ -1,7 +1,7 @@
 // Day-end close and expenses: types and pure helpers shared by the actions, pages and screens.
 // The database (0009_day_close.sql) does the maths in day_summary() / close_day(); this file only shapes and labels it.
 import { addDays, isValidDateStr } from './time';
-import { METHOD_LABEL, type PayMethod } from './types';
+import { isPrepaidMethod, METHOD_LABEL, type PayMethod } from './types';
 
 // ---------- Expenses ----------
 export const EXPENSE_CATEGORIES = ['Rent', 'Electricity', 'Products & supplies', 'Staff advance', 'Tea & snacks', 'Repairs', 'Marketing', 'Other'] as const;
@@ -64,8 +64,10 @@ export const isCashMethod = (m: string) => m === 'cash' || m.startsWith('cash_')
 export const isNuCash = (m: string) => m.startsWith('cash_');
 /** Coins: paid from a prepaid balance — not money received today. */
 export const isCoins = (m: string) => m === 'wallet';
+/** Paid from something bought earlier (coins, package sessions) — not money received today. */
+export const isPrepaid = (m: string) => isPrepaidMethod(m);
 
-const METHOD_ORDER = ['cash', 'cash_nu', 'upi', 'upi_bhutan', 'card', 'other', 'wallet'];
+const METHOD_ORDER = ['cash', 'cash_nu', 'upi', 'upi_bhutan', 'card', 'other', 'wallet', 'package'];
 export function sortMethods(methods: string[]): string[] {
   // Unknown methods go after 'other', before coins.
   const rank = (m: string) => { const i = METHOD_ORDER.indexOf(m); return i < 0 ? METHOD_ORDER.indexOf('wallet') - 0.5 : i; };
@@ -86,11 +88,14 @@ export interface DayTotals {
   /** Money in (not coins) − handed back on cancelled bills. */
   received: number; refunds: number; collected: number;
   coins_sold: number; coins_bonus: number; coins_used: number;
+  /** Money taken for packages sold (an advance), handed back on cancelled packages, and package sessions used on bills. */
+  packages_sold: number; packages_sold_count: number; package_refunds: number; package_used: number;
   expenses: number; expenses_cash: number;
   opening_cash: number; cash_in: number; cash_refunds: number; expected_cash: number;
   opening_cash_nu: number; cash_in_nu: number; cash_refunds_nu: number; expected_cash_nu: number;
 }
-export interface MethodRow { bills: number; coins: number; refunds: number; net: number }
+/** Money by payment method: on bills, for coins sold, for packages sold, handed back; net = in − back. */
+export interface MethodRow { bills: number; coins: number; packages: number; refunds: number; net: number }
 export interface DayStaffRow {
   staff_id: string | null; user_id: string | null; name: string; color: string | null;
   services: number; sales: number; collected: number; collected_by_method: Record<string, number>;
@@ -130,7 +135,8 @@ const numMap = (o: unknown): Record<string, number> =>
   Object.fromEntries(Object.entries((o ?? {}) as Record<string, unknown>).map(([k, v]) => [k, num(v)]));
 
 const TOTAL_KEYS: (keyof DayTotals)[] = ['bills', 'sales', 'taxable', 'tax', 'discounts', 'discounted_bills', 'due', 'voids', 'voids_total',
-  'received', 'refunds', 'collected', 'coins_sold', 'coins_bonus', 'coins_used', 'expenses', 'expenses_cash',
+  'received', 'refunds', 'collected', 'coins_sold', 'coins_bonus', 'coins_used',
+  'packages_sold', 'packages_sold_count', 'package_refunds', 'package_used', 'expenses', 'expenses_cash',
   'opening_cash', 'cash_in', 'cash_refunds', 'expected_cash', 'opening_cash_nu', 'cash_in_nu', 'cash_refunds_nu', 'expected_cash_nu'];
 
 /** Coerce the JSON from day_summary() (or a stored snapshot) into a DaySummary with real numbers and safe defaults. */
@@ -139,7 +145,7 @@ export function normalizeSummary(raw: unknown, date = ''): DaySummary {
   const totals = Object.fromEntries(TOTAL_KEYS.map((k) => [k, num(r.totals?.[k])])) as unknown as DayTotals;
   const byMethod: Record<string, MethodRow> = {};
   for (const [m, v] of Object.entries((r.by_method ?? {}) as Record<string, any>)) {
-    byMethod[m] = { bills: num(v?.bills), coins: num(v?.coins), refunds: num(v?.refunds), net: num(v?.net) };
+    byMethod[m] = { bills: num(v?.bills), coins: num(v?.coins), packages: num(v?.packages), refunds: num(v?.refunds), net: num(v?.net) };
   }
   return {
     date: r.date ?? date,
@@ -174,7 +180,7 @@ export function cashDifference(counted: number, expected: number): CashCheck {
 export function methodRows(byMethod: Record<string, MethodRow>): { method: string; row: MethodRow }[] {
   return sortMethods(Object.keys(byMethod))
     .map((method) => ({ method, row: byMethod[method] }))
-    .filter(({ row }) => row.bills || row.coins || row.refunds);
+    .filter(({ row }) => row.bills || row.coins || row.packages || row.refunds);
 }
 
 /** True when the Ngultrum count should be asked for. */

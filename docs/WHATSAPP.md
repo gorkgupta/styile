@@ -43,6 +43,7 @@ Replies inside the 24-hour customer-service window are free-form. Outside it (re
 | `appointment_reminder` | Hi {{1}}, a reminder about your {{2}} on {{3}} with {{4}} at {{5}}. Reply to this message if you need to change it. |
 | `bill_receipt` | Hi {{1}}, thank you for visiting {{2}}! Your bill {{3}} for {{4}} is ready. — with a **URL button** "View bill" → `https://styile.com/b/{{1}}` (one link for every salon; it forwards to the bill on the salon's own address) |
 | `coins_update` | Hi {{1}}, {{2}} coins have been added to your balance at {{3}}. Your balance is now {{4}} coins — use them on your next bill. ({{1}} name, {{2}} coins added, {{3}} salon, {{4}} balance) |
+| `package_receipt` | Hi {{1}}, we received {{2}} for {{3}} at {{4}} (receipt {{5}}). Your sessions: {{6}}. Use them by {{7}} — just tell us on your visit. This is a receipt, not a tax invoice; GST is on each visit's bill. ({{1}} name, {{2}} amount, {{3}} package, {{4}} salon, {{5}} receipt no., {{6}} sessions, {{7}} last day) |
 
 Optional: add Hindi (`hi`) versions with the same names.
 
@@ -53,6 +54,7 @@ Optional: add Hindi (`hi`) versions with the same names.
 * Book, reschedule and cancel — **always via a Confirm button**; nothing is written until the client confirms, and the database refuses double bookings.
 * Answer questions about services, prices, timings and anything the salon adds under Settings → WhatsApp → "What the assistant should know".
 * Tell clients their **coin balance** at the salon and their recent coin use (`my_coins`). Coins are bought at the front desk only; the assistant can't add coins or take payments.
+* Tell clients the **sessions left in their packages**, when each package ends, and their **membership card** (discount and end date) (`my_packages`). Packages and cards are sold at the front desk only.
 * Hand over to a person (complaints, refunds, bridal/group bookings, medical questions, or on request). The chat then shows **Needs reply** in the inbox and the assistant stays quiet until the team resumes it.
 
 Voice notes and images aren't understood yet; the assistant asks the client to type.

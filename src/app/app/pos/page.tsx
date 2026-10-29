@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { PosScreen, type PosProps } from '@/components/app/pos';
 import { requirePermission } from '@/lib/context';
-import { getMenu, getTeam } from '@/lib/queries';
+import { getClientBenefits, getMenu, getTeam } from '@/lib/queries';
 import { fmtTime, localDate } from '@/lib/time';
 import { serviceGstRate } from '@/lib/gst';
 import { isValidVpa } from '@/lib/upi';
@@ -16,6 +16,7 @@ export default async function PosPage({ searchParams }: { searchParams: Promise<
   const sp = await searchParams;
   const db = ctx.supabase;
   const [menu, staff] = await Promise.all([getMenu(db, ctx.salon.id), getTeam(db, ctx.salon.id)]);
+  const today = localDate(new Date(), ctx.salon.timezone);
 
   let prefill: PosProps['prefill'] = null;
   if (sp.appointment) {
@@ -44,13 +45,17 @@ export default async function PosPage({ searchParams }: { searchParams: Promise<
     const { data: c } = await db.from('customers').select(CLIENT_COLS).eq('id', sp.customer).eq('salon_id', ctx.salon.id).maybeSingle();
     if (c) prefill = { appointmentId: null, customer: c as ClientLite, lines: [] };
   }
+  // The client's package sessions and member discount, ready on the first render.
+  if (prefill?.customer) prefill.benefits = await getClientBenefits(db, ctx.salon.id, prefill.customer.id, today);
 
   return (
     <PosScreen
       salon={{
         gstMode: ctx.salon.gst_mode,
         pricesIncludeTax: ctx.salon.prices_include_tax,
-        serviceRate: serviceGstRate(localDate(new Date(), ctx.salon.timezone)),
+        serviceRate: serviceGstRate(today),
+        today,
+        timezone: ctx.salon.timezone,
         payMethods: ctx.salon.payment_methods,
         upi: isValidVpa(ctx.salon.upi_vpa) ? { vpa: ctx.salon.upi_vpa, name: ctx.salon.upi_payee_name || ctx.salon.name } : null,
         receiptSize: ctx.salon.receipt_size ?? '80',

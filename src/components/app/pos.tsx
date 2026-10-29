@@ -10,11 +10,14 @@ import { deskMethods, isUpiMethod, METHOD_ICON, REF_PLACEHOLDER, parseAmount } f
 import { UpiQr } from '@/components/ui/upi-qr';
 import { BHUTAN_UPI_LIMITS } from '@/lib/upi';
 import { createInvoice } from '@/actions/billing';
+import { getClientBenefits } from '@/actions/packages';
 import type { ClientLite } from '@/actions/appointments';
 import { computeBill, money } from '@/lib/billing';
 import { coinsText, fmtCoins, usableCoins } from '@/lib/coins';
+import { dayText, memberPctFor, pctText, perksText, usableSessions } from '@/lib/packages';
+import { localDate } from '@/lib/time';
 import { B2C_ADDRESS_LIMIT, billDocument, billTypeFor, BUSINESS_GSTIN_RE, cleanGstin, HSN_RE, PRODUCT_TAX_TYPES } from '@/lib/gst';
-import type { GstMode, PayMethod, ReceiptSize, Service, ServiceCategory, Staff } from '@/lib/types';
+import type { ClientMembership, ClientPackage, GstMode, PayMethod, ReceiptSize, Service, ServiceCategory, Staff } from '@/lib/types';
 import { METHOD_LABEL } from '@/lib/types';
 
 export interface PosPrefillLine { serviceId: string | null; name: string; price: number; staffId: string | null; gstRate: number | null }
@@ -33,13 +36,23 @@ export interface PosProps {
     upi?: { vpa: string; name: string } | null;
     /** Paper the bill page prints on after saving. */
     receiptSize?: ReceiptSize;
+    /** The salon's local date (package expiry, membership). */
+    today?: string;
+    timezone?: string;
   };
   services: Service[];
   categories: ServiceCategory[];
   staff: Staff[];
   /** Set when checking out an appointment (?appointment=) or billing a known client (?customer=). */
-  prefill?: { appointmentId: string | null; customer: ClientLite | null; lines: PosPrefillLine[]; context?: string } | null;
+  prefill?: {
+    appointmentId: string | null; customer: ClientLite | null; lines: PosPrefillLine[]; context?: string;
+    /** The client's packages with sessions left and their membership card (loaded with the page). */
+    benefits?: Benefits | null;
+  } | null;
 }
+
+/** What the client can use on this bill: package sessions and their member discount. */
+export interface Benefits { packages: ClientPackage[]; membership: ClientMembership | null }
 
 interface Line {
   key: string; kind: 'service' | 'product' | 'custom'; serviceId: string | null; staffId: string;
@@ -48,6 +61,8 @@ interface Line {
   gstRate: number | null;
   /** Products: HSN code (optional). */
   code: string;
+  /** Taken from this package of the client's (priced at the session's value, paid from the package). */
+  packageId: string | null;
 }
 /** `auto` rows take whatever is left of the total until someone types an amount into them. */
 interface PayRow { key: string; method: PayMethod; amount: string; reference: string; auto: boolean }
@@ -66,7 +81,7 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
   const [client, setClient] = useState<ClientLite | null>(prefill?.customer ?? null);
   const [lines, setLines] = useState<Line[]>(() => (prefill?.lines ?? []).map((l) => ({
     key: nextKey(), kind: l.serviceId ? 'service' : 'custom', serviceId: l.serviceId, staffId: l.staffId ?? '',
-    name: l.name, qty: 1, unitPrice: Number(l.price), discount: '', gstRate: l.gstRate, code: '',
+    name: l.name, qty: 1, unitPrice: Number(l.price), discount: '', gstRate: l.gstRate, code: '', packageId: null,
   })));
   const [defaultStaff, setDefaultStaff] = useState(prefill?.lines.find((l) => l.staffId)?.staffId ?? '');
   const enabledMethods = deskMethods(salon.payMethods);
@@ -96,6 +111,34 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
 
   const regular = salon.gstMode === 'regular';
   const doc = billDocument(billTypeFor(salon.gstMode));
+  const today = salon.today ?? localDate(new Date(), salon.timezone ?? 'Asia/Kolkata');
+
+  // Packages and membership: loaded for the client on the bill.
+  const [benefits, setBenefits] = useState<Benefits | null>(prefill?.benefits ?? null);
+  const benefitsFor = useRef<string | null>(prefill?.customer?.id ?? null);
+  useEffect(() => {
+    const id = client?.id ?? null;
+    if (benefitsFor.current === id) return;
+    benefitsFor.current = id;
+    setBenefits(null);
+    // Package sessions belong to the client: a different client can't keep them on the bill.
+    setLines((cur) => cur.map((l) => (l.packageId ? { ...l, packageId: null, unitPrice: menuPrice(l) } : l)));
+    if (!id) return;
+    let live = true;
+    getClientBenefits(id).then((r) => { if (live && r.ok) setBenefits(r.data ?? null); });
+    return () => { live = false; };
+  }, [client?.id]);
+  const membership = benefits?.membership ?? null;
+  const menuPrice = (l: Line) => Number(services.find((x) => x.id === l.serviceId)?.price ?? l.unitPrice);
+  /** Sessions of a package item already put on this bill (other than `exceptKey`). */
+  const sessionsOnBill = (packageId: string, serviceId: string | null, exceptKey?: string) =>
+    lines.filter((l) => l.packageId === packageId && l.serviceId === serviceId && l.key !== exceptKey).reduce((s, l) => s + l.qty, 0);
+  const sessionsFor = (l: Line) => usableSessions(benefits?.packages ?? [], l.serviceId, today)
+    .map((u) => ({ ...u, free: u.left - sessionsOnBill(u.packageId, l.serviceId, l.key) }));
+  const usePackage = (l: Line, packageId: string | null) => {
+    const u = packageId ? sessionsFor(l).find((x) => x.packageId === packageId) : null;
+    update(l.key, u ? { packageId: u.packageId, unitPrice: u.unitValue, discount: '', qty: Math.min(l.qty, Math.max(1, u.free)) } : { packageId: null, unitPrice: menuPrice(l) });
+  };
 
   const coinBalance = Math.max(0, Number(client?.coin_balance ?? 0));
   const methods = deskMethods(salon.payMethods, { clientHasCoins: coinBalance > 0 });
@@ -108,22 +151,33 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
   }, [client, salon.waConnected, defaultMethod]);
 
   const bill = useMemo(() => computeBill(
-    lines.map((l) => ({ kind: l.kind, name: l.name, qty: l.qty, unitPrice: l.unitPrice, discount: parseAmount(l.discount), gstRate: l.gstRate })),
+    lines.map((l) => ({
+      kind: l.kind, name: l.name, qty: l.qty, unitPrice: l.unitPrice, discount: l.packageId ? 0 : parseAmount(l.discount), gstRate: l.gstRate,
+      fromPackage: !!l.packageId, memberPct: l.packageId ? 0 : memberPctFor(l.kind, membership),
+    })),
     { gstMode: salon.gstMode, pricesIncludeTax: salon.pricesIncludeTax, serviceRate: salon.serviceRate },
-  ), [lines, salon.gstMode, salon.pricesIncludeTax, salon.serviceRate]);
+  ), [lines, salon.gstMode, salon.pricesIncludeTax, salon.serviceRate, membership]);
+  // Package sessions are paid from the package; the client pays the rest now.
+  const fromPackages = bill.packageTotal;
+  const packagesUsed = [...new Set(lines.filter((l) => l.packageId).map((l) => benefits?.packages.find((p) => p.id === l.packageId)?.name).filter(Boolean))];
 
   const fixedSum = pays.filter((p) => !p.auto).reduce((s, p) => s + parseAmount(p.amount), 0);
-  const remainder = Math.max(0, Math.round((bill.total - fixedSum) * 100) / 100);
+  const remainder = Math.max(0, Math.round((bill.total - fromPackages - fixedSum) * 100) / 100);
   // A Coins row that fills the rest never takes more than the client has.
   const fixedCoins = pays.filter((p) => !p.auto && p.method === 'wallet').reduce((s, p) => s + parseAmount(p.amount), 0);
   const autoAmount = (p: PayRow) => (p.method === 'wallet' ? usableCoins(coinBalance - fixedCoins, remainder) : remainder);
   const payRows = pays.map((p) => (p.auto ? { ...p, amount: autoAmount(p) ? String(autoAmount(p)) : '' } : p));
-  const paid = Math.round(payRows.reduce((s, p) => s + parseAmount(p.amount), 0) * 100) / 100;
+  const paid = Math.round((fromPackages + payRows.reduce((s, p) => s + parseAmount(p.amount), 0)) * 100) / 100;
   const balance = Math.round((bill.total - paid) * 100) / 100;
   const coinsUsed = Math.round(payRows.filter((p) => p.method === 'wallet').reduce((s, p) => s + parseAmount(p.amount), 0) * 100) / 100;
   const coinsShort = coinsUsed > coinBalance + 0.001;
   const coinsBlocked = !client ? 'Choose the client to pay with their coins.' : coinBalance <= 0 ? `${client.name.split(' ')[0]} has no coins at your salon.` : null;
-  const overDiscount = lines.some((l) => parseAmount(l.discount) > l.qty * l.unitPrice);
+  const overDiscount = bill.lines.some((b, i) => !lines[i]?.packageId && b.discount > Math.round(lines[i].qty * lines[i].unitPrice * 100) / 100);
+  const packageOver = lines.some((l) => {
+    if (!l.packageId) return false;
+    const u = sessionsFor(l).find((x) => x.packageId === l.packageId);
+    return !u || u.free < l.qty;
+  });
   const rates = [...new Set(bill.lines.map((l) => l.gstRate))];
   const halfRate = rates.length === 1 ? `${rates[0] / 2}%` : null;
   const gstinClean = cleanGstin(clientGstin);
@@ -146,9 +200,9 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
   const addService = (s: Service) => {
     setError(null);
     setLines((cur) => {
-      const same = cur.find((l) => l.serviceId === s.id && l.staffId === defaultStaff);
+      const same = cur.find((l) => l.serviceId === s.id && l.staffId === defaultStaff && !l.packageId);
       if (same) return cur.map((l) => (l === same ? { ...l, qty: l.qty + 1 } : l));
-      return [...cur, { key: nextKey(), kind: 'service', serviceId: s.id, staffId: defaultStaff, name: s.name, qty: 1, unitPrice: Number(s.price), discount: '', gstRate: s.gst_rate, code: '' }];
+      return [...cur, { key: nextKey(), kind: 'service', serviceId: s.id, staffId: defaultStaff, name: s.name, qty: 1, unitPrice: Number(s.price), discount: '', gstRate: s.gst_rate, code: '', packageId: null }];
     });
   };
 
@@ -164,7 +218,7 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
     setError(null);
     setLines((cur) => [...cur, {
       key: nextKey(), kind: customKind, serviceId: null, staffId: isProduct ? '' : defaultStaff, name, qty: 1, unitPrice: price, discount: '',
-      gstRate: isProduct ? (regular ? customRate : 0) : null, code: isProduct ? hsn : '',
+      gstRate: isProduct ? (regular ? customRate : 0) : null, code: isProduct ? hsn : '', packageId: null,
     }]);
     setCustomName(''); setCustomPrice(''); setCustomHsn('');
     customNameRef.current?.focus();
@@ -190,8 +244,8 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
     const others = rows.filter((p) => p.method !== 'wallet');
     const keyOfRest = others.find((p) => p.auto)?.key ?? others[0]?.key;
     const fixedOthers = others.filter((p) => p.key !== keyOfRest).reduce((s, p) => s + parseAmount(p.amount), 0);
-    const amount = usableCoins(coinBalance, bill.total - fixedOthers);
-    const rest = Math.round((bill.total - fixedOthers - amount) * 100) / 100;
+    const amount = usableCoins(coinBalance, bill.total - fromPackages - fixedOthers);
+    const rest = Math.round((bill.total - fromPackages - fixedOthers - amount) * 100) / 100;
     const coinRow: PayRow = { key: nextKey(), method: 'wallet', amount: String(amount), reference: '', auto: false };
     // Coins cover the whole bill: the row that would take the rest is no longer needed.
     const kept = others.map((p) => ({ ...p, auto: p.key === keyOfRest })).filter((p) => !(p.key === keyOfRest && rest <= 0));
@@ -205,6 +259,7 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
     if (coinsUsed > 0 && coinsBlocked) return setError(coinsBlocked);
     if (coinsShort) return setError(`${client?.name.split(' ')[0] ?? 'The client'} has only ${coinsText(coinBalance)}. Lower the Coins amount.`);
     if (overDiscount) return setError('A discount is more than the item price. Fix it to continue.');
+    if (packageOver) return setError('A package line has more sessions than are left. Lower the quantity.');
     if (productNoRate) return setError('Choose the product type (GST rate) for every product on the bill.');
     if (gstinBad) return setError('Client GSTIN should be 15 characters, like 19ABCDE1234F1Z5. Clear it for a walk-in.');
     if (balance < 0) return setError(`Payments are ${money(-balance)} more than the bill. Correct the amounts.`);
@@ -213,7 +268,8 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
       appointmentId: prefill?.appointmentId ?? null,
       items: lines.map((l) => ({
         kind: l.kind, serviceId: l.serviceId, staffId: l.staffId || null, name: l.name,
-        qty: l.qty, unitPrice: l.unitPrice, discount: parseAmount(l.discount), gstRate: l.gstRate, code: l.code || null,
+        qty: l.qty, unitPrice: l.unitPrice, discount: l.packageId ? 0 : parseAmount(l.discount), gstRate: l.gstRate, code: l.code || null,
+        clientPackageId: l.packageId,
       })),
       payments: payRows.filter((p) => parseAmount(p.amount) > 0).map((p) => ({ method: p.method, amount: parseAmount(p.amount), reference: p.reference })),
       notes,
@@ -227,7 +283,7 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
   });
 
   const saveLabel = `Save bill · ${money(bill.total)}`;
-  const canSave = lines.length > 0 && !overDiscount && balance >= 0 && !coinsShort && !productNoRate && !gstinBad;
+  const canSave = lines.length > 0 && !overDiscount && !packageOver && balance >= 0 && !coinsShort && !productNoRate && !gstinBad;
   const payState = !lines.length ? null
     : balance < 0 ? <span className="small strong danger-text">{money(-balance)} more than the bill</span>
     : balance === 0 ? <span className="small strong success-text">Paid in full</span>
@@ -309,6 +365,22 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
           <div className="stack pos-bill">
             <Panel title="Client" className="pos-client" actions={!client ? <span className="small muted">Optional for walk-ins</span> : undefined}>
               <ClientPicker value={client} onChange={setClient} />
+              {client && membership && (
+                <div className="member-strip">
+                  <span className="member-badge" aria-hidden><Icon name="idcard" size={17} /></span>
+                  <div className="grow" style={{ minWidth: 0 }}>
+                    <div className="strong small">{membership.name} member</div>
+                    <div className="tiny muted truncate">{perksText(membership)} · until {dayText(membership.ends_on, today)}</div>
+                  </div>
+                  {bill.memberDiscountTotal > 0 && <span className="small strong success-text num nowrap">−{money(bill.memberDiscountTotal)}</span>}
+                </div>
+              )}
+              {client && !!benefits?.packages.length && (
+                <div className="tiny muted row" style={{ gap: 6 }}>
+                  <Icon name="box" size={14} />
+                  {benefits.packages.map((p) => p.name).join(', ')} · tap “Use package” on a service
+                </div>
+              )}
               {regular && (b2bOpen || needsAddress) && (
                 <div className="stack-sm pos-b2b">
                   {b2bOpen && (
@@ -340,10 +412,13 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
                   {lines.map((l, i) => {
                     const calc = bill.lines[i];
                     const base = l.qty * l.unitPrice;
-                    const disc = parseAmount(l.discount);
-                    const bad = disc > base;
+                    const disc = calc.discount;
+                    const bad = !l.packageId && disc > base;
+                    const pkgName = l.packageId ? benefits?.packages.find((p) => p.id === l.packageId)?.name ?? 'package' : null;
+                    const sessions = l.kind === 'service' ? sessionsFor(l) : [];
+                    const using = l.packageId ? sessions.find((u) => u.packageId === l.packageId) : undefined;
                     return (
-                      <li key={l.key} className="bill-line">
+                      <li key={l.key} className={cx('bill-line', l.packageId && 'is-package')}>
                         <div className="between" style={{ alignItems: 'flex-start' }}>
                           <div className="grow">
                             <div className="strong">{l.name}</div>
@@ -354,10 +429,13 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
                                   regular && l.code ? `HSN ${l.code}` : ''].filter(Boolean).join(' · ')}
                               </div>
                             )}
+                            {pkgName && <div className="tiny strong pkg-line-note"><Icon name="box" size={13} />From {pkgName} · session value {money(l.unitPrice)}</div>}
+                            {calc.memberDiscount > 0 && <div className="tiny strong success-text num">Member {pctText(calc.memberPct)} · −{money(calc.memberDiscount)}</div>}
                           </div>
                           <div className="right">
                             <div className="strong num">{money(calc.lineTotal)}</div>
                             {disc > 0 && !bad && <div className="tiny muted num"><s>{money(base)}</s></div>}
+                            {l.packageId && <div className="tiny muted">Paid from package</div>}
                           </div>
                           <Button size="sm" variant="ghost" icon="x" aria-label={`Remove ${l.name}`} onClick={() => remove(l.key)} />
                         </div>
@@ -377,8 +455,9 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
                           <div className="stepper" role="group" aria-label={`Quantity of ${l.name}`}>
                             <button type="button" aria-label="One less" disabled={l.qty <= 1} onClick={() => update(l.key, { qty: l.qty - 1 })}><Icon name="minus" size={15} /></button>
                             <span className="num" aria-live="polite">{l.qty}</span>
-                            <button type="button" aria-label="One more" onClick={() => update(l.key, { qty: l.qty + 1 })}><Icon name="plus" size={15} /></button>
+                            <button type="button" aria-label="One more" disabled={!!using && l.qty >= using.free} onClick={() => update(l.key, { qty: l.qty + 1 })}><Icon name="plus" size={15} /></button>
                           </div>
+                          {!l.packageId && <>
                           <div className="prefix-input pos-disc">
                             <span>−₹</span>
                             <input className="input input-sm num" inputMode="decimal" placeholder="Discount" value={l.discount}
@@ -392,7 +471,23 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
                                 onClick={() => update(l.key, { discount: l.discount === v ? '' : v })}>{pct}%</button>
                             );
                           })}
+                          </>}
                         </div>
+                        {(sessions.length > 0 || l.packageId) && (
+                          <div className="pkg-chips" role="group" aria-label={`Use a package for ${l.name}`}>
+                            {l.packageId ? (
+                              <button type="button" className="chip chip-sm pkg-chip" aria-pressed onClick={() => usePackage(l, null)}
+                                title="Charge the menu price instead">
+                                <Icon name="box" size={14} />Using {pkgName}{using ? (using.free - l.qty <= 0 ? ' · last session' : ` · ${using.free - l.qty} of ${using.total} left after`) : ''}
+                                <Icon name="x" size={13} />
+                              </button>
+                            ) : sessions.filter((u) => u.free > 0).map((u) => (
+                              <button key={u.packageId} type="button" className="chip chip-sm pkg-chip" aria-pressed={false} onClick={() => usePackage(l, u.packageId)}>
+                                <Icon name="box" size={14} />Use package: {l.name} ({u.free} of {u.total} left)
+                              </button>
+                            ))}
+                          </div>
+                        )}
                         {bad && <div className="error-text">Discount is more than {money(base)}.</div>}
                       </li>
                     );
@@ -429,6 +524,15 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
 
             <Panel title="Payment" className="pos-pay" actions={payState}>
               <div className="stack">
+                {fromPackages > 0 && (
+                  <div className="pkg-strip">
+                    <span className="pkg-badge" aria-hidden><Icon name="box" size={18} /></span>
+                    <div className="grow" style={{ minWidth: 0 }}>
+                      <div className="strong num">Package sessions: {money(fromPackages)}</div>
+                      <div className="tiny muted truncate">Paid from {packagesUsed.join(', ')} · bought earlier, not money taken today</div>
+                    </div>
+                  </div>
+                )}
                 {client && coinBalance > 0 && (
                   <div className="coin-strip">
                     <span className="coin-badge" aria-hidden><Icon name="coins" size={18} /></span>
@@ -438,7 +542,7 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
                         {coinsUsed > 0 ? `${fmtCoins(coinsUsed)} on this bill · ${fmtCoins(Math.max(coinBalance - coinsUsed, 0))} left after` : `${client.name.split(' ')[0]}’s balance · 1 coin = ₹1`}
                       </div>
                     </div>
-                    {lines.length > 0 && (coinsUsed === 0 || (coinsUsed < Math.min(coinBalance, bill.total) && balance > 0)) && (
+                    {lines.length > 0 && bill.total - fromPackages > 0 && (coinsUsed === 0 || (coinsUsed < Math.min(coinBalance, bill.total - fromPackages) && balance > 0)) && (
                       <Button size="sm" icon="coins" onClick={useCoins}>Use coins</Button>
                     )}
                   </div>

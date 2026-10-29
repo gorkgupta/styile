@@ -5,6 +5,7 @@ import { salonUrl } from '@/lib/tenant';
 import { money } from '@/lib/billing';
 import { billDocument, type BillType } from '@/lib/gst';
 import { fmtCoins } from '@/lib/coins';
+import { dayText } from '@/lib/packages';
 import { fmtDateShort, fmtTime, localDate } from '@/lib/time';
 import { sendWhatsApp, WhatsAppError, type OutgoingMessage } from './cloud-api';
 
@@ -17,6 +18,7 @@ export const TEMPLATES = {
   reminder: 'appointment_reminder',            // {{1}} name {{2}} services {{3}} date & time {{4}} stylist {{5}} salon
   receipt: 'bill_receipt',                     // {{1}} name {{2}} salon {{3}} bill no {{4}} amount ; URL button param = invoice id
   coinsUpdate: 'coins_update',                 // {{1}} name {{2}} coins added {{3}} salon {{4}} balance
+  packageReceipt: 'package_receipt',           // {{1}} name {{2}} amount {{3}} package {{4}} salon {{5}} receipt no {{6}} sessions {{7}} use by
 } as const;
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -165,6 +167,25 @@ export async function notifyCoinsAdded(salonId: string, customerId: string, paid
   return notifyCustomer(salonId, c.phone, c.id,
     `${money(paid)} received — ${fmtCoins(coinsAdded)} coins added at ${c.salon.name}. Balance: ${fmtCoins(balance)} coins. Use them on your next bill here.`,
     { type: 'template', name: TEMPLATES.coinsUpdate, bodyParams: [first, fmtCoins(coinsAdded), c.salon.name, fmtCoins(balance)] });
+}
+
+/** Package receipt after a sale at the desk: "₹9,000 received for 6 Facials at Glow Studio (receipt PK-00012) …". */
+export async function notifyPackageSold(salonId: string, clientPackageId: string) {
+  const db = createAdminClient();
+  const { data } = await db.from('client_packages')
+    .select('id, name, amount_paid, receipt_no, expires_on, items:client_package_items(name, sessions_total, sort), customer:customers(id, name, phone), salon:salons(name)')
+    .eq('id', clientPackageId).eq('salon_id', salonId).single();
+  const p = data as unknown as {
+    id: string; name: string; amount_paid: number; receipt_no: string; expires_on: string;
+    items: { name: string; sessions_total: number; sort: number }[]; customer: { id: string; name: string; phone: string }; salon: { name: string };
+  } | null;
+  if (!p) return { sent: false, reason: 'Package not found' };
+  const first = p.customer.name.split(' ')[0];
+  const sessions = [...p.items].sort((a, b) => a.sort - b.sort).map((i) => `${i.name} ×${i.sessions_total}`).join(', ');
+  const until = dayText(p.expires_on);
+  return notifyCustomer(salonId, p.customer.phone, p.customer.id,
+    `${money(p.amount_paid)} received for ${p.name} at ${p.salon.name} (receipt ${p.receipt_no}). Your sessions: ${sessions}. Use them by ${until} — just tell the desk on your visit. This is a package receipt, not a tax invoice; GST is on each visit's bill.`,
+    { type: 'template', name: TEMPLATES.packageReceipt, bodyParams: [first, money(p.amount_paid), p.name, p.salon.name, p.receipt_no, sessions, until] });
 }
 
 /** A person at the salon replies from the inbox. Throws a readable error if the 24h window is closed. */

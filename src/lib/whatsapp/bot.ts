@@ -8,6 +8,8 @@ import { markReadWithTyping, type OutgoingMessage } from './cloud-api';
 import { deliver, ensureConversation, getSalonWa } from './outbox';
 import { runEngine, type EngineContext, type Pending } from './engine';
 import type { CoinKind } from '@/lib/types';
+import { CLIENT_PACKAGE_SELECT, membershipState, normalizeClientPackage, normalizeMembership, packageState, sessionsLeft } from '@/lib/packages';
+import { localDate } from '@/lib/time';
 
 // Wires the assistant engine to Supabase, the booking service and WhatsApp.
 
@@ -171,6 +173,20 @@ async function handleMessage(phoneNumberId: string, profileName: string | null, 
           recent: ((tx ?? []) as unknown as Row[]).map((t) => ({
             kind: t.kind, coins: Number(t.coins), balance_after: Number(t.balance_after), created_at: t.created_at, bill: t.invoice?.invoice_no ?? null,
           })),
+        };
+      },
+      // Packages and cards are per salon too.
+      packages: async () => {
+        const today = localDate(new Date(), salon.timezone);
+        const [{ data: pk }, { data: cards }] = await Promise.all([
+          db.from('client_packages').select(CLIENT_PACKAGE_SELECT).eq('salon_id', salon.id).eq('customer_id', customer.id).eq('status', 'active').gte('expires_on', today).order('expires_on'),
+          db.from('client_memberships').select('*').eq('salon_id', salon.id).eq('customer_id', customer.id).eq('status', 'active').gte('ends_on', today).order('ends_on'),
+        ]);
+        const packages = (pk ?? []).map(normalizeClientPackage).filter((p) => packageState(p, today) === 'active');
+        const card = (cards ?? []).map(normalizeMembership).find((m) => ['active', 'upcoming'].includes(membershipState(m, today))) ?? null;
+        return {
+          packages: packages.map((p) => ({ name: p.name, expires_on: p.expires_on, items: p.items.map((i) => ({ name: i.name, left: sessionsLeft(i), total: i.sessions_total })) })),
+          membership: card ? { name: card.name, starts_on: card.starts_on, ends_on: card.ends_on, service_discount_pct: card.service_discount_pct, product_discount_pct: card.product_discount_pct } : null,
         };
       },
     }, inbound);

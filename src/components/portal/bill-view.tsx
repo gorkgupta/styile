@@ -27,7 +27,9 @@ export interface CustomerBill {
   };
   customer: { name: string; phone: string } | null;
   items: {
-    id: string; name: string; kind: 'service' | 'product' | 'custom'; code: string | null; qty: number; unit_price: number; discount: number;
+    id: string; name: string; kind: 'service' | 'product' | 'custom' | 'membership'; code: string | null; qty: number; unit_price: number; discount: number;
+    /** "Member 10%" or "Package". */
+    discount_note?: string | null;
     gst_rate: number; taxable: number; tax: number; line_total: number; stylist: string | null;
   }[];
   payments: { method: PayMethod; amount: number }[];
@@ -90,7 +92,7 @@ export function BillView({ bill, phone, base }: { bill: CustomerBill; phone?: st
                       <div className="strong">{i.name}</div>
                       <div className="tiny muted">{[i.stylist, doc.showTax ? `GST ${Number(i.gst_rate)}%` : null,
                         doc.showTax && i.code ? `${i.kind === 'product' ? 'HSN' : 'SAC'} ${i.code}` : null,
-                        Number(i.discount) ? `Discount ${money2(i.discount)}` : null].filter(Boolean).join(' · ')}</div>
+                        Number(i.discount) ? `Discount ${money2(i.discount)}${i.discount_note ? ` (${i.discount_note})` : ''}` : i.discount_note === 'Package' ? 'From your package' : null].filter(Boolean).join(' · ')}</div>
                     </td>
                     <td className="right num">{Number(i.qty)}</td>
                     <td className="right num hide-mobile">{money2(i.unit_price)}</td>

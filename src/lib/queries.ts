@@ -1,7 +1,8 @@
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { addDays, zonedToUtc } from './time';
-import type { AppointmentFull, Service, ServiceCategory, Staff } from './types';
+import type { AppointmentFull, ClientMembership, ClientPackage, Service, ServiceCategory, Staff } from './types';
+import { activeMembership, CLIENT_PACKAGE_SELECT, normalizeClientPackage, normalizeMembership, packageState } from './packages';
 import type { Expense, ExpenseRow } from './dayclose';
 
 const APPT_SELECT = '*, customer:customers(id, name, phone, visit_count, notes), services:appointment_services(service_id, name, price, duration_min, sort)';
@@ -62,4 +63,31 @@ export async function memberNames(db: SupabaseClient, salonId: string, userIds: 
   for (const p of (profiles.data ?? []) as { id: string; full_name: string | null }[]) if (p.full_name) out.set(p.id, p.full_name);
   for (const s of (staff.data ?? []) as { user_id: string; name: string }[]) out.set(s.user_id, s.name);
   return out;
+}
+
+/** A client's packages with sessions left today and their membership card valid today (for the POS). */
+export async function getClientBenefits(db: SupabaseClient, salonId: string, customerId: string, today: string): Promise<{ packages: ClientPackage[]; membership: ClientMembership | null }> {
+  const [pk, mem] = await Promise.all([
+    db.from('client_packages').select(CLIENT_PACKAGE_SELECT).eq('salon_id', salonId).eq('customer_id', customerId)
+      .eq('status', 'active').gte('expires_on', today).order('expires_on'),
+    db.from('client_memberships').select('*').eq('salon_id', salonId).eq('customer_id', customerId)
+      .eq('status', 'active').lte('starts_on', today).gte('ends_on', today),
+  ]);
+  if (pk.error) throw pk.error;
+  if (mem.error) throw mem.error;
+  return {
+    packages: (pk.data ?? []).map(normalizeClientPackage).filter((p) => packageState(p, today) === 'active'),
+    membership: activeMembership((mem.data ?? []).map(normalizeMembership), today),
+  };
+}
+
+/** Every package and card a client has had at this salon, newest first (client profile). */
+export async function getClientPackagesAndCards(db: SupabaseClient, salonId: string, customerId: string): Promise<{ packages: ClientPackage[]; memberships: ClientMembership[] }> {
+  const [pk, mem] = await Promise.all([
+    db.from('client_packages').select(CLIENT_PACKAGE_SELECT).eq('salon_id', salonId).eq('customer_id', customerId).order('purchased_at', { ascending: false }).limit(50),
+    db.from('client_memberships').select('*').eq('salon_id', salonId).eq('customer_id', customerId).order('ends_on', { ascending: false }).limit(20),
+  ]);
+  if (pk.error) throw pk.error;
+  if (mem.error) throw mem.error;
+  return { packages: (pk.data ?? []).map(normalizeClientPackage), memberships: (mem.data ?? []).map(normalizeMembership) };
 }

@@ -10,6 +10,8 @@ import { PortalHome, type PortalBill, type PortalVisit } from '@/components/port
 import { shownOnline } from '@/lib/stylists';
 import type { CoinRow } from '@/components/app/coin-history';
 import type { ApptStatus, InvoiceStatus } from '@/lib/types';
+import { activeMembership, CLIENT_PACKAGE_SELECT, membershipState, normalizeClientPackage, normalizeMembership, packageState } from '@/lib/packages';
+import { localDate } from '@/lib/time';
 
 export const metadata: Metadata = { title: 'Your bookings' };
 export const dynamic = 'force-dynamic';
@@ -44,7 +46,7 @@ export default async function Page({ params }: { params: Promise<{ slug: string 
   const customerIds = customers.map((c) => c.id);
 
   const nowIso = new Date().toISOString();
-  const [appts, invoices, coinTx] = customerIds.length ? await Promise.all([
+  const [appts, invoices, coinTx, pkgs, cards] = customerIds.length ? await Promise.all([
     supabase.from('appointments')
       .select('id, salon_id, start_at, end_at, status, invoice_id, staff_id, services:appointment_services(name, price, sort, service_id)')
       .in('customer_id', customerIds).eq('salon_id', site.id).neq('status', 'waiting').order('start_at', { ascending: false }).limit(60),
@@ -53,7 +55,10 @@ export default async function Page({ params }: { params: Promise<{ slug: string 
     // Coins bought here can only be spent here, so only this salon's ledger is shown.
     supabase.from('coin_transactions').select('id, kind, coins, balance_after, amount_paid, method, invoice_id, note, created_at, invoice:invoices(invoice_no)')
       .in('customer_id', customerIds).eq('salon_id', site.id).order('created_at', { ascending: false }).limit(10),
-  ]) : [{ data: [] }, { data: [] }, { data: [] }];
+    // Packages and membership cards bought here (RLS: the client's own only).
+    supabase.from('client_packages').select(CLIENT_PACKAGE_SELECT).in('customer_id', customerIds).eq('salon_id', site.id).order('expires_on').limit(20),
+    supabase.from('client_memberships').select('*').in('customer_id', customerIds).eq('salon_id', site.id).order('ends_on', { ascending: false }).limit(5),
+  ]) : [{ data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: [] }];
 
   // Clients can't read staff rows (phones, commission); stylist names and photos for their own visits come from the
   // service role, and only public fields are passed on.
@@ -89,6 +94,10 @@ export default async function Page({ params }: { params: Promise<{ slug: string 
     amount_paid: t.amount_paid == null ? null : Number(t.amount_paid), invoice_no: invoice?.invoice_no ?? null,
   }));
   const coinBalance = customers.reduce((s, c) => s + Number(c.coin_balance ?? 0), 0);
+  const today = localDate(new Date(), site.timezone);
+  const packages = (pkgs.data ?? []).map(normalizeClientPackage).filter((p) => packageState(p, today) === 'active');
+  const allCards = (cards.data ?? []).map(normalizeMembership);
+  const membership = activeMembership(allCards, today) ?? allCards.find((m) => membershipState(m, today) === 'upcoming') ?? null;
 
   const meta = (user.user_metadata ?? {}) as { full_name?: string };
   const name = customers.find((c) => c.name && c.name !== phone)?.name ?? meta.full_name ?? '';
@@ -102,6 +111,7 @@ export default async function Page({ params }: { params: Promise<{ slug: string 
       }}
       upcoming={upcoming} past={past} bills={bills}
       coins={{ balance: coinBalance, history: coinHistory }}
+      packages={packages} membership={membership} today={today}
     />
   );
 }

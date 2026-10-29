@@ -9,7 +9,7 @@ import { portraitOf, previewSkills, profiledStaff as staff } from '../stylist-da
 import { coinReport, salonWithCoins } from '../coins-data';
 
 const salon = { ...salonWithCoins, gst_mode: 'regular' as const };
-const report = { ...baseReport, ...coinReport, by_method: { ...baseReport.by_method, wallet: 48760 } };
+export const report = { ...baseReport, ...coinReport, by_method: { ...baseReport.by_method, wallet: 48760 } };
 
 // A couple of extra rows so the screens show archived / online-off / uncategorised states.
 const menuServices = [

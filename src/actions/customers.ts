@@ -74,14 +74,16 @@ export async function deleteCustomer(id: string): Promise<ActionResult> {
   try {
     const { supabase, salon, role } = await getSalonContext();
     if (!can(role, 'deleteClients')) return { ok: false, error: 'Only an owner or manager can delete clients.' };
-    const [appts, bills, coins] = await Promise.all([
+    const [appts, bills, coins, pkgs, cards] = await Promise.all([
       supabase.from('appointments').select('id', { count: 'exact', head: true }).eq('salon_id', salon.id).eq('customer_id', id),
       supabase.from('invoices').select('id', { count: 'exact', head: true }).eq('salon_id', salon.id).eq('customer_id', id),
       supabase.from('coin_transactions').select('id', { count: 'exact', head: true }).eq('salon_id', salon.id).eq('customer_id', id),
+      supabase.from('client_packages').select('id', { count: 'exact', head: true }).eq('salon_id', salon.id).eq('customer_id', id),
+      supabase.from('client_memberships').select('id', { count: 'exact', head: true }).eq('salon_id', salon.id).eq('customer_id', id),
     ]);
-    const a = appts.count ?? 0, b = bills.count ?? 0, k = coins.count ?? 0;
-    if (a || b || k) {
-      const what = [a ? `${a} appointment${a > 1 ? 's' : ''}` : '', b ? `${b} bill${b > 1 ? 's' : ''}` : '', k ? 'coin history' : ''].filter(Boolean).join(' and ');
+    const a = appts.count ?? 0, b = bills.count ?? 0, k = coins.count ?? 0, pk = (pkgs.count ?? 0) + (cards.count ?? 0);
+    if (a || b || k || pk) {
+      const what = [a ? `${a} appointment${a > 1 ? 's' : ''}` : '', b ? `${b} bill${b > 1 ? 's' : ''}` : '', k ? 'coin history' : '', pk ? 'packages or a membership card' : ''].filter(Boolean).join(' and ');
       return { ok: false, error: `This client has ${what}, so they can’t be deleted — their history is needed for your records and GST. You can edit their details instead.` };
     }
     must(await supabase.from('customers').delete().eq('id', id).eq('salon_id', salon.id));

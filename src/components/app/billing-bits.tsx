@@ -8,12 +8,12 @@ import { ALL_PAY_METHODS, DEFAULT_PAY_METHODS, METHOD_LABEL } from '@/lib/types'
 export const PAY_METHODS: PayMethod[] = ALL_PAY_METHODS;
 
 export const METHOD_ICON: Record<PayMethod, IconName> = {
-  cash: 'cash', upi: 'upi', card: 'card', wallet: 'coins', other: 'more', cash_nu: 'cash', upi_bhutan: 'upi',
+  cash: 'cash', upi: 'upi', card: 'card', wallet: 'coins', other: 'more', cash_nu: 'cash', upi_bhutan: 'upi', package: 'box',
 };
 
 export const REF_PLACEHOLDER: Record<PayMethod, string> = {
   cash: 'Note (optional)', upi: 'UPI ref no. (optional)', card: 'Last 4 digits (optional)', wallet: 'Note (optional)', other: 'Details (optional)',
-  cash_nu: 'Note (optional)', upi_bhutan: 'Bank app ref no. (optional)',
+  cash_nu: 'Note (optional)', upi_bhutan: 'Bank app ref no. (optional)', package: 'Added from the package',
 };
 
 /** UPI-type payments that can be collected with the salon's QR (Bhutanese apps scan the same Indian QR). */
@@ -37,9 +37,9 @@ export function InvoiceStatusBadge({ status }: { status: InvoiceStatus }) {
   return <Badge tone={TONE[status]}>{INVOICE_STATUS_LABEL[status]}</Badge>;
 }
 
-/** "UPI", "Cash + UPI", or "—" when nothing has been paid. */
+/** "UPI", "Cash + UPI", "Package", or "—" when nothing has been paid. */
 export function methodSummary(methods: PayMethod[]): string {
-  const uniq = PAY_METHODS.filter((m) => methods.includes(m));
+  const uniq = [...PAY_METHODS, 'package' as const].filter((m) => methods.includes(m));
   return uniq.length ? uniq.map((m) => METHOD_LABEL[m]).join(' + ') : '—';
 }
 

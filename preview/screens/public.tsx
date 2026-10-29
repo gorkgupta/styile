@@ -35,7 +35,7 @@ const ist = (date: string, hhmm: string) => {
 const svcLines = (...ids: string[]) => ids.map((id) => { const s = services.find((x) => x.id === id)!; return { name: s.name, price: s.price }; });
 const st = (id: string) => { const s = staff.find((x) => x.id === id)!; return { id: s.id, name: s.name, color: s.color, photoUrl: s.photo_url, bookable: true }; };
 
-const portalProps: PortalProps = {
+export const portalProps: PortalProps = {
   me: { name: 'Ananya Krishnan', phone: '919845098450' },
   nowIso: NOW_ISO,
   base: '',
