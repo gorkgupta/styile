@@ -16,6 +16,10 @@ const RULES = {
   manageStaff: ['owner', 'manager'],
   manageTeamAccess: ['owner'],
   viewReports: ['owner', 'manager'],
+  closeDay: ['owner', 'manager', 'receptionist'],
+  reopenDay: ['owner', 'manager'],
+  addExpense: ['owner', 'manager', 'receptionist'],   // front desk: today's and yesterday's only
+  manageExpenses: ['owner', 'manager'],               // edit, delete, see every month
   inbox: ['owner', 'manager', 'receptionist'],
   settings: ['owner'],
 } as const satisfies Record<string, readonly MemberRole[]>;

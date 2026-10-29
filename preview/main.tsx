@@ -7,8 +7,9 @@ import { screens as core } from './screens/core';
 import { screens as billing } from './screens/billing';
 import { screens as manage } from './screens/manage';
 import { screens as publicSide } from './screens/public';
+import { screens as dayclose } from './screens/dayclose';
 
-const all = { ...core, ...billing, ...manage, ...publicSide };
+const all = { ...core, ...billing, ...manage, ...publicSide, ...dayclose };
 const sub = (l: () => void) => { window.addEventListener('hashchange', l); return () => window.removeEventListener('hashchange', l); };
 
 function Index() {

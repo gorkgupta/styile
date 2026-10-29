@@ -31,11 +31,13 @@ export function AppShell(props: ShellProps) {
     { href: '/app/queue', label: 'Walk-ins', icon: 'queue', perm: 'viewCalendar', count: props.queueCount, mobile: true },
     { href: '/app/pos', label: 'New bill', icon: 'receipt', perm: 'bill', mobile: true },
     { href: '/app/invoices', label: 'Bills', icon: 'wallet', perm: 'bill' },
+    { href: '/app/close', label: 'Day close', icon: 'lock', perm: 'closeDay' },
     { href: '/app/customers', label: 'Clients', icon: 'users', perm: 'viewClients', mobile: true },
     { href: '/app/inbox', label: 'WhatsApp', icon: 'chat', perm: 'inbox', count: props.inboxUnread },
   ];
   const manage: NavItem[] = [
     { href: '/app/reports', label: 'Reports', icon: 'chart', perm: 'viewReports' },
+    { href: '/app/expenses', label: 'Expenses', icon: 'expense', perm: 'addExpense' },
     { href: '/app/services', label: 'Services', icon: 'scissors', perm: 'manageMenu' },
     { href: '/app/staff', label: 'Team', icon: 'user', perm: 'manageStaff' },
     { href: '/app/settings', label: 'Settings', icon: 'settings', perm: 'settings' },

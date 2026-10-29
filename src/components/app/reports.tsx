@@ -12,6 +12,7 @@ import { dayKeyOf, fmtDateShort } from '@/lib/time';
 import { COMPOSITION_RATE, REGISTRATION_THRESHOLD } from '@/lib/gst';
 import type { ApptStatus, BookingSource, GstMode, PayMethod, SalonReport } from '@/lib/types';
 import { METHOD_LABEL, SOURCE_LABEL } from '@/lib/types';
+import { profitAfterExpenses, type ExpenseReport } from '@/lib/dayclose';
 
 export interface ReportsProps {
   report: SalonReport;
@@ -22,6 +23,8 @@ export interface ReportsProps {
   salonName: string;
   /** Decides the tax tile: GST collected (regular), composition estimate, or the ₹20 lakh threshold meter. */
   gstMode: GstMode;
+  /** Expenses in the range (0009_day_close.sql expense_report). null when unavailable. */
+  expenses?: ExpenseReport | null;
 }
 
 const n = (v: unknown) => Number(v ?? 0) || 0;
@@ -50,7 +53,7 @@ function Delta({ now, before, label }: { now: number; before: number | null; lab
   );
 }
 
-export function ReportsScreen({ report, previous, range, today, salonName, gstMode }: ReportsProps) {
+export function ReportsScreen({ report, previous, range, today, salonName, gstMode, expenses }: ReportsProps) {
   const days = daysInRange(range.from, range.to);
   const prevLabel = range.key === 'today' ? 'yesterday' : range.key === 'yesterday' ? 'day before' : range.key === 'month' || range.key === 'lastmonth' ? 'previous month' : `previous ${days} days`;
   const series = useMemo(() => {
@@ -111,6 +114,7 @@ export function ReportsScreen({ report, previous, range, today, salonName, gstMo
               <div className="stack">
                 <SourcesPanel bySource={report.by_source ?? {}} />
                 <MethodsPanel byMethod={report.by_method ?? {}} />
+                {expenses && <ExpensesReportPanel report={report} expenses={expenses} range={range} />}
                 <CoinsReportPanel report={report} />
               </div>
             </div>
@@ -474,6 +478,38 @@ function OutcomesPanel({ appts, total }: { appts: Partial<Record<ApptStatus, num
           )}
         </div>
       ) : <p className="small muted">No appointments in this period.</p>}
+    </Panel>
+  );
+}
+
+function ExpensesReportPanel({ report, expenses, range }: { report: SalonReport; expenses: ExpenseReport; range: ReportRange }) {
+  const { netSales, expenses: running, profit } = profitAfterExpenses(n(report.revenue), n(report.tax), expenses);
+  const cats = Object.entries(expenses.by_category).filter(([c, v]) => v && c !== 'Staff advance').sort((a, b) => n(b[1]) - n(a[1]));
+  const max = Math.max(1, ...cats.map(([, v]) => n(v)));
+  const month = range.from.slice(0, 7) === range.to.slice(0, 7) ? range.from.slice(0, 7) : null;
+  return (
+    <Panel title={<h2 className="row" style={{ gap: 8 }}><Icon name="expense" size={18} className="muted" />Expenses and profit</h2>}
+      actions={<Link className="btn btn-ghost btn-sm" href={month ? `/app/expenses?month=${month}` : '/app/expenses'}>See expenses</Link>}>
+      <div className="stack">
+        <div className="coin-report">
+          <div><div className="small muted">Expenses</div><div className="coin-report-value num">{money(Math.round(running))}</div>
+            <div className="tiny muted">{expenses.staff_advances ? `+ ${money(Math.round(expenses.staff_advances))} staff advances` : `${n(expenses.count)} entr${n(expenses.count) === 1 ? 'y' : 'ies'}`}</div></div>
+          <div><div className="small muted">Profit after expenses</div><div className={`coin-report-value num${profit < 0 ? ' danger-text' : ''}`}>{money(Math.round(profit))}</div>
+            <div className="tiny muted">Before staff pay</div></div>
+        </div>
+        {cats.length > 0 && (
+          <div className="stack-sm">
+            {cats.slice(0, 5).map(([c, v]) => (
+              <div key={c} className="bar-row">
+                <span className="truncate" title={c}>{c}</span>
+                <div className="bar" aria-hidden><span className="bar-muted" style={{ width: `${(n(v) / max) * 100}%` }} /></div>
+                <span className="num small nowrap bar-val">{money(Math.round(n(v)))}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        <p className="tiny muted">Sales before GST {money(Math.round(netSales))} − expenses {money(Math.round(running))}. Staff advances are part of staff pay, so they aren’t subtracted here. {running ? '' : 'Log rent, electricity and supplies under Expenses to see real profit.'}</p>
+      </div>
     </Panel>
   );
 }
