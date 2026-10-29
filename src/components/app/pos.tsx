@@ -1,17 +1,20 @@
 'use client';
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Button, Notice, Panel, SearchInput, Segmented, Switch, TextField, cx, useToast } from '@/components/ui/ui';
 import { Icon } from '@/components/ui/icons';
 import { Topbar } from './shell';
 import { ClientPicker } from './pickers';
-import { METHOD_ICON, PAY_METHODS, REF_PLACEHOLDER, parseAmount } from './billing-bits';
+import { deskMethods, isUpiMethod, METHOD_ICON, REF_PLACEHOLDER, parseAmount } from './billing-bits';
+import { UpiQr } from '@/components/ui/upi-qr';
+import { BHUTAN_UPI_LIMITS } from '@/lib/upi';
 import { createInvoice } from '@/actions/billing';
 import type { ClientLite } from '@/actions/appointments';
 import { computeBill, money } from '@/lib/billing';
 import { coinsText, fmtCoins, usableCoins } from '@/lib/coins';
 import { B2C_ADDRESS_LIMIT, billDocument, billTypeFor, BUSINESS_GSTIN_RE, cleanGstin, HSN_RE, PRODUCT_TAX_TYPES } from '@/lib/gst';
-import type { GstMode, PayMethod, Service, ServiceCategory, Staff } from '@/lib/types';
+import type { GstMode, PayMethod, ReceiptSize, Service, ServiceCategory, Staff } from '@/lib/types';
 import { METHOD_LABEL } from '@/lib/types';
 
 export interface PosPrefillLine { serviceId: string | null; name: string; price: number; staffId: string | null; gstRate: number | null }
@@ -24,6 +27,12 @@ export interface PosProps {
     /** Statutory GST on services today (serviceGstRate). */
     serviceRate: number;
     waConnected: boolean; nextInvoiceNo: string;
+    /** Payment types the desk sees (Settings). */
+    payMethods?: PayMethod[];
+    /** The salon's own UPI ID for the pay-by-QR (null = not set up). */
+    upi?: { vpa: string; name: string } | null;
+    /** Paper the bill page prints on after saving. */
+    receiptSize?: ReceiptSize;
   };
   services: Service[];
   categories: ServiceCategory[];
@@ -46,6 +55,7 @@ interface PayRow { key: string; method: PayMethod; amount: string; reference: st
 let seq = 0;
 const nextKey = () => `k${++seq}`;
 const freshPay = (method: PayMethod): PayRow => ({ key: nextKey(), method, amount: '', reference: '', auto: true });
+const PRINT_PREF = 'styile.printAfterSave';
 
 export function PosScreen({ salon, services, categories, staff, prefill }: PosProps) {
   const router = useRouter();
@@ -59,7 +69,13 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
     name: l.name, qty: 1, unitPrice: Number(l.price), discount: '', gstRate: l.gstRate, code: '',
   })));
   const [defaultStaff, setDefaultStaff] = useState(prefill?.lines.find((l) => l.staffId)?.staffId ?? '');
-  const [pays, setPays] = useState<PayRow[]>(() => [freshPay('upi')]);
+  const enabledMethods = deskMethods(salon.payMethods);
+  const defaultMethod: PayMethod = enabledMethods.includes('upi') ? 'upi' : enabledMethods.find((m) => m !== 'wallet') ?? 'cash';
+  const [pays, setPays] = useState<PayRow[]>(() => [freshPay(defaultMethod)]);
+  // Print the receipt straight after saving (remembered on this device).
+  const [printAfter, setPrintAfter] = useState(true);
+  useEffect(() => { try { const v = localStorage.getItem(PRINT_PREF); if (v !== null) setPrintAfter(v === '1'); } catch { /* private mode */ } }, []);
+  const changePrintAfter = (v: boolean) => { setPrintAfter(v); try { localStorage.setItem(PRINT_PREF, v ? '1' : '0'); } catch { /* ignore */ } };
   const [sendWa, setSendWa] = useState(!!prefill?.customer && salon.waConnected);
   const [notes, setNotes] = useState('');
   const [showNotes, setShowNotes] = useState(false);
@@ -82,13 +98,14 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
   const doc = billDocument(billTypeFor(salon.gstMode));
 
   const coinBalance = Math.max(0, Number(client?.coin_balance ?? 0));
+  const methods = deskMethods(salon.payMethods, { clientHasCoins: coinBalance > 0 });
   const firstClient = useRef(true);
   useEffect(() => {
     if (firstClient.current) { firstClient.current = false; return; }
     setSendWa(!!client && salon.waConnected);
     // Coins belong to the client: a new client without coins can't keep a Coins payment.
-    if (!Number(client?.coin_balance ?? 0)) setPays((rows) => rows.map((p) => (p.method === 'wallet' ? { ...p, method: 'upi' } : p)));
-  }, [client, salon.waConnected]);
+    if (!Number(client?.coin_balance ?? 0)) setPays((rows) => rows.map((p) => (p.method === 'wallet' ? { ...p, method: defaultMethod } : p)));
+  }, [client, salon.waConnected, defaultMethod]);
 
   const bill = useMemo(() => computeBill(
     lines.map((l) => ({ kind: l.kind, name: l.name, qty: l.qty, unitPrice: l.unitPrice, discount: parseAmount(l.discount), gstRate: l.gstRate })),
@@ -163,7 +180,7 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
   const fillRest = (key: string) => setPays2((rows) => rows.map((p) => (p.key === key ? { ...p, auto: true } : { ...p, auto: false })));
   const addPayRow = () => {
     const used = new Set(payRows.map((p) => p.method));
-    const method = PAY_METHODS.find((m) => !used.has(m) && (m !== 'wallet' || !coinsBlocked)) ?? 'cash';
+    const method = methods.find((m) => !used.has(m) && (m !== 'wallet' || !coinsBlocked)) ?? defaultMethod;
     // Existing rows keep their amounts; the new row picks up the rest once one of them is changed.
     setPays2((rows) => [...rows.map((p) => ({ ...p, auto: false })), freshPay(method)]);
   };
@@ -178,7 +195,7 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
     const coinRow: PayRow = { key: nextKey(), method: 'wallet', amount: String(amount), reference: '', auto: false };
     // Coins cover the whole bill: the row that would take the rest is no longer needed.
     const kept = others.map((p) => ({ ...p, auto: p.key === keyOfRest })).filter((p) => !(p.key === keyOfRest && rest <= 0));
-    if (rest > 0 && !kept.some((p) => p.auto)) kept.push(freshPay('upi'));
+    if (rest > 0 && !kept.some((p) => p.auto)) kept.push(freshPay(defaultMethod));
     return [coinRow, ...kept];
   });
 
@@ -206,7 +223,7 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
     });
     if (!r.ok) { setError(r.error); toast(r.error, 'error'); return; }
     toast(r.message ?? 'Bill saved');
-    router.push(`/app/invoices/${r.data!.id}`);
+    router.push(`/app/invoices/${r.data!.id}${printAfter ? '?print=1' : ''}`);
   });
 
   const saveLabel = `Save bill · ${money(bill.total)}`;
@@ -222,7 +239,7 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
       <Topbar title="New bill" back={prefill?.appointmentId ? '/app' : undefined}
         subtitle={prefill?.context ?? `Next bill no. ${salon.nextInvoiceNo}`}
         actions={lines.length > 0 && !prefill?.appointmentId
-          ? <Button variant="ghost" size="sm" onClick={() => { setLines([]); setPays([freshPay('upi')]); }}>Clear</Button>
+          ? <Button variant="ghost" size="sm" onClick={() => { setLines([]); setPays([freshPay(defaultMethod)]); }}>Clear</Button>
           : undefined} />
       <div className="page">
         <div className="pos">
@@ -430,7 +447,7 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
                   <div key={p.key} className="pay-row">
                     <div className="between">
                       <div className="pay-methods" role="group" aria-label={`Payment ${idx + 1} method`}>
-                        {PAY_METHODS.map((m) => {
+                        {methods.map((m) => {
                           const off = m === 'wallet' && !!coinsBlocked && p.method !== 'wallet';
                           return (
                             <button key={m} type="button" className="chip chip-sm" aria-pressed={p.method === m} disabled={off}
@@ -448,7 +465,7 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
                         <input className="input num pay-amount" inputMode="decimal" placeholder="0" value={p.amount}
                           aria-label={`Amount paid by ${METHOD_LABEL[p.method]}`} onChange={(e) => setPayAmount(p.key, e.target.value)} />
                       </div>
-                      {p.method !== 'cash' && p.method !== 'wallet' && (
+                      {p.method !== 'cash' && p.method !== 'cash_nu' && p.method !== 'wallet' && (
                         <input className="input" placeholder={REF_PLACEHOLDER[p.method]} value={p.reference}
                           aria-label="Payment reference" onChange={(e) => setPay(p.key, { reference: e.target.value })} />
                       )}
@@ -461,9 +478,20 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
                         <Button size="sm" onClick={() => fillRest(p.key)}>Full amount</Button>
                       )}
                     </div>
+                    {p.method === 'upi_bhutan' && parseAmount(p.amount) > BHUTAN_UPI_LIMITS.perPayment && (
+                      <p className="tiny warn-text">Bhutanese bank apps allow up to {money(BHUTAN_UPI_LIMITS.perPayment)} a payment and {money(BHUTAN_UPI_LIMITS.perDay)} a day. Split it or take the rest another way.</p>
+                    )}
+                    {isUpiMethod(p.method) && parseAmount(p.amount) > 0 && lines.length > 0 && (salon.upi ? (
+                      <div className="pay-qr">
+                        <UpiQr vpa={salon.upi.vpa} name={salon.upi.name} amount={parseAmount(p.amount)} note={`Bill ${salon.nextInvoiceNo}`} size={132} caption="short" />
+                        <p className="tiny muted">To {salon.upi.name} · <span className="mono">{salon.upi.vpa}</span><br />The client scans and pays you directly. Check the payment on your phone or soundbox, then save the bill.</p>
+                      </div>
+                    ) : (
+                      <p className="tiny muted">Show a pay-by-QR here: add your UPI ID in <Link href="/app/settings#payments">Settings</Link>.</p>
+                    ))}
                   </div>
                 ))}
-                {coinsBlocked && <p className="tiny muted row" style={{ gap: 6 }}><Icon name="coins" size={14} />{client ? `${coinsBlocked} Sell coins from their client profile.` : `Coins: ${coinsBlocked.charAt(0).toLowerCase()}${coinsBlocked.slice(1)}`}</p>}
+                {coinsBlocked && methods.includes('wallet') && <p className="tiny muted row" style={{ gap: 6 }}><Icon name="coins" size={14} />{client ? `${coinsBlocked} Sell coins from their client profile.` : `Coins: ${coinsBlocked.charAt(0).toLowerCase()}${coinsBlocked.slice(1)}`}</p>}
                 {!payRows.length && (
                   <p className="small muted">No payment taken now. The bill will be saved as unpaid and you can record payment later.</p>
                 )}
@@ -481,6 +509,8 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
                     Send bill on WhatsApp
                     {!salon.waConnected ? <span className="muted"> · connect WhatsApp in Settings</span> : !client ? <span className="muted"> · choose a client first</span> : null}
                   </span>} />
+                <Switch checked={printAfter} onChange={changePrintAfter}
+                  label={<span className="small">Print receipt after saving <span className="muted">· {salon.receiptSize === 'a4' ? 'A4' : `${salon.receiptSize ?? '80'} mm`}</span></span>} />
                 {error && <Notice tone="error">{error}</Notice>}
                 <Button variant="primary" size="lg" block loading={pending} disabled={!canSave} onClick={save} className="hide-mobile">{saveLabel}</Button>
               </div>

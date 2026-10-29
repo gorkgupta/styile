@@ -64,7 +64,7 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
       canDelete={can(ctx.role, 'deleteClients')}
       canBill={canBill}
       coins={coinRows ? {
-        salon: { name: ctx.salon.name, enabled: ctx.salon.coins_enabled, packs: ctx.salon.coin_packs ?? [], waConnected: !!ctx.salon.wa_phone_number_id },
+        salon: { name: ctx.salon.name, enabled: ctx.salon.coins_enabled, packs: ctx.salon.coin_packs ?? [], waConnected: !!ctx.salon.wa_phone_number_id, methods: ctx.salon.payment_methods },
         history: coinRows.slice(0, COIN_ROWS), moreHistory: coinRows.length > COIN_ROWS,
         canSell: canSellCoins, canBonus: can(ctx.role, 'giveCoinBonus'), canAdjust: can(ctx.role, 'adjustCoins'),
       } : null}

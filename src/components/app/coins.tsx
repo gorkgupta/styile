@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button, Dialog, Notice, Panel, Segmented, Sheet, Switch, TextArea, TextField, cx, useToast } from '@/components/ui/ui';
 import { Icon } from '@/components/ui/icons';
-import { METHOD_ICON, REF_PLACEHOLDER, parseAmount } from './billing-bits';
+import { deskMethods, METHOD_ICON, REF_PLACEHOLDER, parseAmount } from './billing-bits';
 import { CoinHistoryList, type CoinRow } from './coin-history';
 import { adjustCoins, getCoinHistory, loadCoins } from '@/actions/coins';
 import { money } from '@/lib/billing';
@@ -17,7 +17,8 @@ import { METHOD_LABEL } from '@/lib/types';
 
 export interface CoinsPanelProps {
   customer: { id: string; name: string; balance: number };
-  salon: { name: string; enabled: boolean; packs: CoinPack[]; waConnected: boolean };
+  /** methods: the salon's payment types (Settings); coins can be bought with any of them except coins. */
+  salon: { name: string; enabled: boolean; packs: CoinPack[]; waConnected: boolean; methods?: PayMethod[] };
   /** Most recent ledger rows (newest first). */
   history: CoinRow[];
   /** More rows exist than were loaded. */
@@ -94,7 +95,7 @@ export function CoinsPanel({ customer, salon, history, moreHistory, tz, canSell,
 // ---------------------------------------------------------------------------
 // Sell coins
 // ---------------------------------------------------------------------------
-const LOAD_METHODS: PayMethod[] = ['cash', 'upi', 'card'];
+const loadMethods = (enabled?: PayMethod[]) => deskMethods(enabled).filter((m) => m !== 'wallet' && m !== 'other');
 interface Receipt { pay: number; coins: number; bonus: number; balance: number; method: PayMethod; reference: string; at: string; sent: boolean }
 
 export function SellCoinsSheet({ open, onClose, customer, salon, canBonus, tz }: {
@@ -209,7 +210,7 @@ export function SellCoinsSheet({ open, onClose, customer, salon, canBonus, tz }:
         <div className="field">
           <span className="label">Paid by</span>
           <div className="row-wrap" role="group" aria-label="Paid by">
-            {LOAD_METHODS.map((m) => (
+            {loadMethods(salon.methods).map((m) => (
               <button key={m} type="button" className="chip chip-sm" aria-pressed={method === m} onClick={() => setMethod(m)}>
                 <Icon name={METHOD_ICON[m]} size={14} />{METHOD_LABEL[m]}
               </button>

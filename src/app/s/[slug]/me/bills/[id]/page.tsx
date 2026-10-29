@@ -28,7 +28,7 @@ export default async function Page({ params }: { params: Promise<{ slug: string;
 
   // RLS: a client can read their own invoices, their lines, and the salon. Anything else returns nothing -> 404.
   const { data: inv } = await supabase.from('invoices')
-    .select('id, salon_id, invoice_no, created_at, status, prices_include_tax, subtotal, discount_total, taxable_total, cgst, sgst, igst, round_off, total, paid_total, bill_type, seller_gstin, place_of_supply, client_gstin, client_address, customer:customers(name, phone), salon:salons(name, legal_name, gstin, address, city, state, pincode, phone, slug, timezone)')
+    .select('id, salon_id, invoice_no, created_at, status, prices_include_tax, subtotal, discount_total, taxable_total, cgst, sgst, igst, round_off, total, paid_total, bill_type, seller_gstin, place_of_supply, client_gstin, client_address, customer:customers(name, phone), salon:salons(name, legal_name, gstin, address, city, state, pincode, phone, slug, timezone, upi_vpa, upi_payee_name)')
     .eq('id', id).eq('salon_id', site.id).maybeSingle();
   if (!inv) notFound();
   const row = inv as unknown as {
@@ -36,7 +36,10 @@ export default async function Page({ params }: { params: Promise<{ slug: string;
     subtotal: number; discount_total: number; taxable_total: number; cgst: number; sgst: number; igst: number; round_off: number; total: number; paid_total: number;
     bill_type: BillType; seller_gstin: string | null; place_of_supply: string | null; client_gstin: string | null; client_address: string | null;
     customer: { name: string; phone: string } | null;
-    salon: { name: string; legal_name: string | null; gstin: string | null; address: string | null; city: string | null; state: string | null; pincode: string | null; phone: string | null; slug: string; timezone: string } | null;
+    salon: {
+      name: string; legal_name: string | null; gstin: string | null; address: string | null; city: string | null; state: string | null; pincode: string | null;
+      phone: string | null; slug: string; timezone: string; upi_vpa: string | null; upi_payee_name: string | null;
+    } | null;
   };
   if (!row.salon) notFound();
 
@@ -62,6 +65,7 @@ export default async function Page({ params }: { params: Promise<{ slug: string;
     salon: {
       name: row.salon.name, legalName: row.salon.legal_name, gstin: row.salon.gstin, address: row.salon.address, city: row.salon.city,
       state: row.salon.state, pincode: row.salon.pincode, phone: row.salon.phone, slug: row.salon.slug, timezone: row.salon.timezone,
+      upiVpa: row.salon.upi_vpa, upiName: row.salon.upi_payee_name,
     },
     invoice: {
       invoice_no: row.invoice_no, created_at: row.created_at, status: row.status, prices_include_tax: row.prices_include_tax,

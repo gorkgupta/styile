@@ -2,11 +2,13 @@
 import { rootDomain, salonUrl } from '@/lib/tenant';
 import { useEffect, useState, useTransition, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import { Badge, Button, Notice, Panel, SelectField, Switch, TextArea, TextField, useToast } from '@/components/ui/ui';
+import { Badge, Button, Notice, Panel, Segmented, SelectField, Switch, TextArea, TextField, useToast } from '@/components/ui/ui';
 import { Icon, type IconName } from '@/components/ui/icons';
 import { Topbar } from './shell';
 import { HoursEditor } from './hours-editor';
-import { updateAssistant, updateBilling, updateBusinessHours, updateCoinSettings, updateOnlineBooking, updateSalonProfile } from '@/actions/settings';
+import { updateAssistant, updateBilling, updateBusinessHours, updateCoinSettings, updateOnlineBooking, updatePayments, updateSalonProfile } from '@/actions/settings';
+import { UpiQr } from '@/components/ui/upi-qr';
+import { BHUTAN_UPI_LIMITS, isValidVpa } from '@/lib/upi';
 import { formatPhone } from '@/lib/phone';
 import { PhoneInput } from '@/components/ui/phone-input';
 import { PLAN_LABEL, PLAN_STATUS_LABEL, planById } from '@/lib/plans';
@@ -14,7 +16,7 @@ import { money } from '@/lib/billing';
 import { checkCoinPacks, DEFAULT_COIN_PACKS, fmtCoins, MAX_COIN_PACKS } from '@/lib/coins';
 import { cleanGstin, COMPOSITION_RATE, DEFAULT_STATE, GSTIN_RE, INDIAN_STATES, serviceGstRate, stateByCode, stateByName } from '@/lib/gst';
 import { localDate } from '@/lib/time';
-import type { ActionResult, GstMode, Hours, Salon } from '@/lib/types';
+import { ALL_PAY_METHODS, DEFAULT_PAY_METHODS, METHOD_LABEL, type ActionResult, type GstMode, type Hours, type PayMethod, type ReceiptSize, type Salon } from '@/lib/types';
 
 export interface SettingsProps {
   salon: Salon;
@@ -28,6 +30,7 @@ const NOTES_MAX = 1500;
 const SECTIONS: { id: string; label: string; icon: IconName }[] = [
   { id: 'profile', label: 'Salon profile', icon: 'store' },
   { id: 'billing', label: 'Billing & GST', icon: 'receipt' },
+  { id: 'payments', label: 'Payments & receipts', icon: 'upi' },
   { id: 'coins', label: 'Coins', icon: 'coins' },
   { id: 'hours', label: 'Opening hours', icon: 'clock' },
   { id: 'booking', label: 'Online booking', icon: 'link' },
@@ -107,6 +110,7 @@ export function SettingsScreen({ salon, hours, supportEmail }: SettingsProps) {
           <div className="stack-lg settings-main">
             <ProfileSection salon={salon} />
             <BillingSection salon={salon} />
+            <PaymentsSection salon={salon} />
             <CoinsSection salon={salon} />
             <HoursSection hours={hours} />
             <BookingSection salon={salon} />
@@ -245,6 +249,76 @@ function BillingSection({ salon }: { salon: Salon }) {
           <span><strong>Confirm with your CA.</strong> Styile follows the GST rules as we understand them: salon services at 5% since 22 September 2025,
             retail products at their own rate (5% or 18%), registration from ₹20 lakh a year. We aren’t tax advisers — check your GST status, product rates and bill format with your CA.</span>
         </Notice>
+      </div>
+    </Section>
+  );
+}
+
+const METHOD_HINT: Partial<Record<PayMethod, string>> = {
+  cash: 'Rupee notes', upi: 'Indian UPI apps: PhonePe, Google Pay, Paytm, BHIM', card: 'Debit or credit card machine',
+  cash_nu: 'Bhutanese Ngultrum notes, taken at par with the rupee',
+  upi_bhutan: `Bhutanese bank apps scanning your QR · up to ${money(BHUTAN_UPI_LIMITS.perPayment)} a payment, ${money(BHUTAN_UPI_LIMITS.perDay)} a day`,
+  wallet: 'Clients’ prepaid coins at your salon', other: 'Cheque, bank transfer, anything else',
+};
+const PAPERS: { value: ReceiptSize; label: string; hint: string }[] = [
+  { value: '80', label: '80 mm', hint: 'Most counter receipt printers' },
+  { value: '58', label: '58 mm', hint: 'Small and Bluetooth printers' },
+  { value: 'a4', label: 'A4', hint: 'Full-page invoice on a normal printer' },
+];
+
+function PaymentsSection({ salon }: { salon: Salon }) {
+  const [methods, setMethods] = useState<PayMethod[]>(salon.payment_methods?.length ? salon.payment_methods : DEFAULT_PAY_METHODS);
+  const [vpa, setVpa] = useState(salon.upi_vpa ?? '');
+  const [payee, setPayee] = useState(salon.upi_payee_name ?? salon.name);
+  const [paper, setPaper] = useState<ReceiptSize>(salon.receipt_size ?? '80');
+  const { pending, error, run } = useSave();
+  const toggle = (m: PayMethod) => setMethods((cur) => (cur.includes(m) ? cur.filter((x) => x !== m) : [...cur, m]));
+  const vpaClean = vpa.trim();
+  const vpaOk = isValidVpa(vpaClean);
+  const save = () => run(() => updatePayments({ methods, upiVpa: vpaClean || null, upiPayeeName: payee, receiptSize: paper }));
+
+  return (
+    <Section id="payments" title="Payments & receipts" description="How clients pay you, and what the bill printer prints."
+      footer={<SaveBar pending={pending} error={error} onSave={save} />}>
+      <div className="stack-lg">
+        <fieldset className="check-group">
+          <legend className="tiny muted strong">Payment types at the desk</legend>
+          <div className="check-grid pay-type-grid">
+            {ALL_PAY_METHODS.map((m) => (
+              <label key={m} className="check pay-type">
+                <input type="checkbox" checked={methods.includes(m)} onChange={() => toggle(m)} />
+                <span><span className="strong">{METHOD_LABEL[m]}</span><span className="tiny muted pay-type-hint">{METHOD_HINT[m]}</span></span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        <p className="small ink2">
+          <strong>Near the Bhutan border?</strong> Turn on Cash (Nu) and UPI (Bhutan) so they show up separately in your reports.
+          Bills stay in rupees — don’t add a surcharge for Nu or Bhutanese UPI.{methods.includes('wallet') ? '' : ' Clients who already have coins can still pay with them.'}
+        </p>
+
+        <div className="pay-upi-setup">
+          <div className="stack">
+            <TextField label="Your UPI ID" value={vpa} placeholder="yoursalon@okicici" autoComplete="off" spellCheck={false}
+              onChange={(e) => setVpa(e.target.value.replace(/\s/g, ''))}
+              error={vpaClean && !vpaOk ? 'Looks like name@bank, for example glowstudio@okicici.' : undefined}
+              hint="From your UPI or bank app. Bills with money due show a QR that pays this ID." />
+            <TextField label="Name clients see when paying" value={payee} maxLength={50} onChange={(e) => setPayee(e.target.value)} />
+            <p className="tiny muted">Money goes straight from the client’s app to your account — Styile never handles it. Mark the bill paid when you see the payment.</p>
+          </div>
+          {vpaOk && (
+            <div className="pay-upi-preview">
+              <UpiQr vpa={vpaClean} name={payee.trim() || salon.name} amount={1} note="Test from Styile" size={132} caption="none" />
+              <span className="tiny muted">Test: scan with your phone. It should show your name and ₹1 — you don’t need to pay.</span>
+            </div>
+          )}
+        </div>
+
+        <div className="field pay-paper">
+          <span className="label">Receipt printer</span>
+          <Segmented label="Receipt size" value={paper} onChange={setPaper} options={PAPERS.map((x) => ({ value: x.value, label: x.label }))} />
+          <span className="hint">{PAPERS.find((x) => x.value === paper)?.hint}. Used for “Print receipt” after saving a bill; you can pick another size on any bill.</span>
+        </div>
       </div>
     </Section>
   );

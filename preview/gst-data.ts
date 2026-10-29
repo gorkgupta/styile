@@ -12,13 +12,17 @@ const ist = (date: string, hhmm: string) => {
 };
 
 /** Glow Studio, Bengaluru: regular GST (tax invoices). */
-export const regularSalon: Salon = { ...salonWithCoins, gst_mode: 'regular', default_gst_rate: 5 };
+export const regularSalon: Salon = {
+  ...salonWithCoins, gst_mode: 'regular', default_gst_rate: 5,
+  payment_methods: ['cash', 'upi', 'card', 'wallet'], upi_vpa: 'glowstudio@okicici', upi_payee_name: 'Glow Studio', receipt_size: '80',
+};
 
 /** A small Jaigaon parlour under ₹20 lakh: not registered, plain bills. */
 export const plainSalon: Salon = {
   ...salonWithCoins, id: 'salon-tashi', name: 'Tashi Beauty Parlour', slug: 'tashi-beauty', legal_name: null, gstin: null, gst_mode: 'unregistered',
   phone: '919733012345', email: null, address: 'NS Road, near Bhutan Gate', city: 'Jaigaon', state: 'West Bengal', pincode: '736182',
   invoice_prefix: 'TBP', next_invoice_no: 219, default_gst_rate: 5, wa_phone_number_id: null, wa_display_number: null,
+  payment_methods: ['cash', 'cash_nu', 'upi', 'upi_bhutan'], upi_vpa: 'tashiparlour@ybl', upi_payee_name: 'Tashi Beauty Parlour', receipt_size: '58',
 };
 
 /** A busier Jaigaon unisex salon on the composition scheme: bills of supply. */
@@ -26,6 +30,7 @@ export const bosSalon: Salon = {
   ...salonWithCoins, id: 'salon-dooars', name: 'Dooars Unisex Salon', slug: 'dooars-salon', legal_name: 'Dooars Unisex Salon', gstin: '19AKQPT4821M1Z6',
   gst_mode: 'composition', phone: '919832054321', email: 'dooarssalon@gmail.com', address: 'Main Road, Jaigaon Bazar', city: 'Jaigaon', state: 'West Bengal',
   pincode: '736182', invoice_prefix: 'DUS', next_invoice_no: 1408, default_gst_rate: 5,
+  payment_methods: ['cash', 'cash_nu', 'upi', 'upi_bhutan', 'card', 'wallet'], upi_vpa: 'dooarssalon@oksbi', upi_payee_name: 'Dooars Unisex Salon', receipt_size: '80',
 };
 
 export type SampleLine = BillLineInput & { id: string; kind: 'service' | 'product' | 'custom'; code: string | null; staff_id?: string | null; service_id?: string | null };
@@ -76,14 +81,14 @@ export const bosInvoice = sampleBill(bosSalon, 'DUS-01407', ist('2026-10-27', '1
   { id: 'a', kind: 'service', name: 'Facial (fruit)', qty: 1, unitPrice: 800, gstRate: null, code: '999722' },
   { id: 'b', kind: 'service', name: 'Threading (eyebrows)', qty: 1, unitPrice: 50, gstRate: null, code: '999729' },
   { id: 'c', kind: 'product', name: 'Kesh King hair oil 100 ml', qty: 1, unitPrice: 199, gstRate: 0, code: null },
-], [{ method: 'upi', amount: 1049, reference: 'UPI 8812 0091' }]);
+], [{ method: 'upi_bhutan', amount: 1049, reference: 'BNB 8812 0091' }]);
 
 /** plain — Tashi Beauty Parlour, not registered: a plain bill, part paid in cash. */
 export const plainInvoice = sampleBill(plainSalon, 'TBP-00218', ist('2026-10-27', '12:05'), 'cu-j2', [
   { id: 'a', kind: 'service', name: 'Haircut (ladies)', qty: 1, unitPrice: 250, gstRate: null, code: '999721' },
   { id: 'b', kind: 'service', name: 'Hair spa', qty: 1, unitPrice: 600, gstRate: null, code: '999721' },
   { id: 'c', kind: 'custom', name: 'Waxing (full arms)', qty: 1, unitPrice: 300, discount: 50, gstRate: null, code: '999729' },
-], [{ method: 'cash', amount: 500 }]);
+], [{ method: 'cash_nu', amount: 300, reference: 'Nu notes' }, { method: 'cash', amount: 200 }]);
 
 export const jaigaonClients = {
   'cu-j1': { id: 'cu-j1', name: 'Sonam Lhamo', phone: '919733055501', email: null, coin_balance: 0 },
@@ -94,5 +99,6 @@ export const jaigaonClients = {
 export const gstReports: Record<GstMode, SalonReport> = {
   regular: { ...baseReport, tax: 18440, composition_tax: 0, fy_turnover: 2160000, fy_from: '2026-04-01' },
   composition: { ...baseReport, revenue: 214600, collected: 214600, tax: 0, composition_tax: 12876, fy_turnover: 2905000, fy_from: '2026-04-01' },
-  unregistered: { ...baseReport, revenue: 61800, collected: 59400, bills: 214, avg_bill: 289, tax: 0, composition_tax: 0, fy_turnover: 1684000, fy_from: '2026-04-01' },
+  unregistered: { ...baseReport, revenue: 61800, collected: 59400, bills: 214, avg_bill: 289, tax: 0, composition_tax: 0, fy_turnover: 1684000, fy_from: '2026-04-01',
+    by_method: { cash: 26100, cash_nu: 9800, upi: 17900, upi_bhutan: 5600 } },
 };

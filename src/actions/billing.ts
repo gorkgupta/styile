@@ -5,9 +5,10 @@ import { fail, must } from '@/lib/actions';
 import { can } from '@/lib/permissions';
 import { notifyInvoice } from '@/lib/whatsapp/outbox';
 import { BUSINESS_GSTIN_RE, cleanGstin, GST_SLABS, HSN_RE } from '@/lib/gst';
-import type { ActionResult, PayMethod } from '@/lib/types';
+import { ALL_PAY_METHODS, type ActionResult, type PayMethod } from '@/lib/types';
 
-const METHODS: PayMethod[] = ['cash', 'upi', 'card', 'wallet', 'other'];
+// Any payment type is accepted here (the salon's Settings only decide which ones the desk sees).
+const METHODS: PayMethod[] = ALL_PAY_METHODS;
 
 export interface BillItemInput {
   kind: 'service' | 'product' | 'custom';

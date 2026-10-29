@@ -508,6 +508,40 @@ select t.ok((select bill_type from public.invoices where id = :'c_id') = 'bill_o
 select t.fails(format($q$update public.invoices set bill_type = 'tax_invoice' where id = %L$q$, :'c_id'), 'bill type always matches the bill''s GST mode');
 set role authenticated;
 
+-- ===== Payment types for Jaigaon (0008) and receipts/UPI settings (0010) =====
+select t.ok((select payment_methods = '{cash,upi,card,wallet}' and receipt_size = '80' and upi_vpa is null from public.salons where id = :'salon_u'),
+  'defaults: cash, UPI, card, coins; 80 mm receipts; no UPI ID');
+update public.salons set payment_methods = '{cash,cash_nu,upi,upi_bhutan,wallet}', upi_vpa = 'tashi.parlour@oksbi', upi_payee_name = 'Tashi Beauty Parlour', receipt_size = '58'
+  where id = :'salon_u';
+select t.ok((select payment_methods = '{cash,cash_nu,upi,upi_bhutan,wallet}' and upi_vpa = 'tashi.parlour@oksbi' and receipt_size = '58' from public.salons where id = :'salon_u'),
+  'owner picks payment types (incl. Nu cash and Bhutan UPI), UPI ID and 58 mm receipts');
+select t.fails(format($q$update public.salons set payment_methods = '{cash,bitcoin}' where id = %L$q$, :'salon_u'), 'unknown payment type rejected');
+select t.fails(format($q$update public.salons set payment_methods = '{}' where id = %L$q$, :'salon_u'), 'at least one payment type');
+select t.fails(format($q$update public.salons set payment_methods = '{wallet}' where id = %L$q$, :'salon_u'), 'coins alone are not enough (walk-ins need a way to pay)');
+select t.fails(format($q$update public.salons set payment_methods = '{cash,cash}' where id = %L$q$, :'salon_u'), 'no duplicate payment types');
+select t.fails(format($q$update public.salons set payment_methods = null where id = %L$q$, :'salon_u'), 'payment types cannot be null');
+select t.fails(format($q$update public.salons set upi_vpa = 'tashi parlour@sbi' where id = %L$q$, :'salon_u'), 'UPI ID without spaces');
+select t.fails(format($q$update public.salons set upi_vpa = '9876543210' where id = %L$q$, :'salon_u'), 'UPI ID needs @handle');
+select t.fails(format($q$update public.salons set upi_vpa = 'x@sbi&am=1' where id = %L$q$, :'salon_u'), 'UPI ID cannot smuggle QR parameters');
+select t.fails(format($q$update public.salons set upi_payee_name = repeat('a', 51) where id = %L$q$, :'salon_u'), 'payee name at most 50 characters');
+select t.fails(format($q$update public.salons set receipt_size = '76' where id = %L$q$, :'salon_u'), 'receipt size is A4, 80 mm or 58 mm');
+insert into public.customers (salon_id, name, phone) values (:'salon_u', 'Karma Dorji', '97517654321') returning id as karma \gset
+select * from public.create_invoice(:'salon_u', jsonb_build_object('customer_id', :'karma', 'items', jsonb_build_array(
+  jsonb_build_object('kind','service','service_id',:'u_cut','name','Haircut','qty',3,'unit_price',600)),
+  'payments', '[{"method":"cash_nu","amount":1000,"reference":"Nu notes"},{"method":"upi_bhutan","amount":500,"reference":"BNB 4471"}]'::jsonb)) \gset nu_
+select t.ok(:'nu_status' = 'partial' and :nu_paid_total = 1500 and :nu_total = 1800
+  and (select count(*) from public.payments where invoice_id = :'nu_id' and method in ('cash_nu', 'upi_bhutan')) = 2, 'bill paid with Nu cash and Bhutan UPI, in rupees at par');
+select t.ok((public.add_payment(:'nu_id', 'upi_bhutan', 300, 'BNB 4480')).status = 'paid', 'later payment by Bhutan UPI');
+select t.ok((public.load_coins(:'salon_u', :'karma', 2000, null, 'cash_nu') ->> 'balance')::numeric = 2000, 'coins can be bought with Nu cash');
+select (public.create_invoice(:'salon_u', jsonb_build_object('customer_id', :'karma', 'items', '[{"kind":"custom","name":"Head massage","qty":1,"unit_price":300}]'::jsonb,
+  'payments', '[{"method":"wallet","amount":300}]'::jsonb))).status as kstatus \gset
+select t.ok(:'kstatus' = 'paid' and (select coin_balance from public.customers where id = :'karma') = 1700, 'coins still pay bills at a Jaigaon salon');
+select public.salon_report(:'salon_u', (now() at time zone 'Asia/Kolkata')::date, (now() at time zone 'Asia/Kolkata')::date) as prep \gset
+select t.ok((:'prep'::jsonb -> 'by_method' ->> 'cash_nu')::numeric = 1000 and (:'prep'::jsonb -> 'by_method' ->> 'upi_bhutan')::numeric = 800,
+  'report payment mix shows Nu cash and Bhutan UPI separately');
+select t.fails(format($q$select public.create_invoice(%L, '{"items":[{"kind":"custom","name":"x","qty":1,"unit_price":100}],"payments":[{"method":"paypal","amount":100}]}'::jsonb)$q$, :'salon_u'),
+  'unknown payment method rejected on a bill');
+
 -- ===== Anonymous =====
 reset role;
 set role anon;

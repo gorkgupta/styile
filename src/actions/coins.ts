@@ -11,7 +11,7 @@ import type { ActionResult, CoinTransaction, PayMethod } from '@/lib/types';
 // Selling coins is an advance, not a sale — it never creates a GST invoice. All balance changes happen in the
 // database functions load_coins / adjust_coins (and create_invoice / add_payment / void_invoice for bills).
 
-const LOAD_METHODS: PayMethod[] = ['cash', 'upi', 'card', 'other'];
+const LOAD_METHODS: PayMethod[] = ['cash', 'upi', 'card', 'other', 'cash_nu', 'upi_bhutan'];
 const ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function refresh() { revalidatePath('/app', 'layout'); }

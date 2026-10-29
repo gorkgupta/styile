@@ -7,7 +7,8 @@ import { checkCoinPacks } from '@/lib/coins';
 import { cleanHours } from '@/lib/hours';
 import { invalidPhoneMessage, normalizePhone } from '@/lib/phone';
 import { cleanGstin, GSTIN_RE, stateByCode, stateByName } from '@/lib/gst';
-import type { ActionResult, CoinPack, GstMode, Hours } from '@/lib/types';
+import { isValidVpa } from '@/lib/upi';
+import { ALL_PAY_METHODS, type ActionResult, type CoinPack, type GstMode, type Hours, type PayMethod, type ReceiptSize } from '@/lib/types';
 
 // Salon settings. Only the owner can change these (RLS: salons_owner_update). Subscription, booking link
 // and WhatsApp number fields are guarded by a trigger and managed by the platform admin, so they are
@@ -91,6 +92,28 @@ export async function updateBilling(input: BillingSettingsInput): Promise<Action
     }).eq('id', ctx.salon.id));
     refresh();
     return { ok: true, message: input.gstMode === ctx.salon.gst_mode ? 'Billing settings saved' : 'GST status saved. New bills use it from now on.' };
+  } catch (e) { return fail(e); }
+}
+
+export interface PaymentSettingsInput { methods: PayMethod[]; upiVpa: string | null; upiPayeeName: string | null; receiptSize: ReceiptSize }
+
+/** Payment types the desk sees, the salon's own UPI ID for pay-by-QR, and the default receipt paper. */
+export async function updatePayments(input: PaymentSettingsInput): Promise<ActionResult> {
+  try {
+    const ctx = await ownerContext();
+    if (!ctx) return { ok: false, error: NOT_ALLOWED };
+    const methods = ALL_PAY_METHODS.filter((m) => (input.methods ?? []).includes(m));
+    if (!methods.some((m) => m !== 'wallet')) return { ok: false, error: 'Keep at least one way to pay besides coins, such as Cash.' };
+    const vpa = (input.upiVpa ?? '').trim() || null;
+    if (vpa && !isValidVpa(vpa)) return { ok: false, error: 'UPI ID looks like name@bank, for example glowstudio@okicici. Copy it from your UPI app.' };
+    const payee = text(input.upiPayeeName, 50);
+    if (vpa && !payee) return { ok: false, error: 'Add the name clients should see when they pay (your salon or account name).' };
+    if (!['a4', '80', '58'].includes(input.receiptSize)) return { ok: false, error: 'Choose A4, 80 mm or 58 mm for receipts.' };
+    must(await ctx.supabase.from('salons').update({
+      payment_methods: methods, upi_vpa: vpa, upi_payee_name: vpa ? payee : null, receipt_size: input.receiptSize,
+    }).eq('id', ctx.salon.id));
+    refresh();
+    return { ok: true, message: 'Payment settings saved' };
   } catch (e) { return fail(e); }
 }
 

@@ -860,6 +860,70 @@ img, svg { display: block; }
 .gst-meter.is-danger .meter > span { background: var(--danger); }
 @media (max-width: 860px) { .choice-cards { grid-template-columns: 1fr; } }
 
+/* UPI pay-by-QR (pays the salon's own UPI ID) */
+.upi-qr { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.upi-qr svg { display: block; max-width: 100%; height: auto; }
+.upi-qr .upi-qr-bg { fill: #fff; }
+.upi-qr .upi-qr-fg { fill: #000; }
+.upi-qr figcaption { display: flex; flex-direction: column; align-items: center; gap: 1px; text-align: center; }
+.upi-qr-app { margin-top: 4px; }
+.pay-qr { display: flex; align-items: center; gap: 14px; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); }
+.pay-qr .upi-qr { flex: none; }
+.pay-qr > p { flex: 1; min-width: 0; }
+.invoice-upi .upi-qr { align-items: flex-start; }
+.invoice-upi .upi-qr figcaption { align-items: flex-start; text-align: left; }
+.pt-bill-upi { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 16px; border: 1px dashed var(--line-strong); border-radius: 12px; text-align: center; }
+.invoice-print { gap: 8px; }
+.invoice-print .select { width: auto; }
+.pay-type-grid { gap: 12px 20px; }
+.pay-paper .segmented { align-self: flex-start; }
+.pay-type { align-items: flex-start; }
+.pay-type input { margin-top: 2px; flex: none; }
+.pay-type-hint { display: block; line-height: 1.35; }
+.pay-upi-setup { display: grid; grid-template-columns: minmax(0, 1fr) 190px; gap: 20px; align-items: start; }
+.pay-upi-preview { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px; border: 1px dashed var(--line-strong); border-radius: var(--radius); text-align: center; }
+@media (max-width: 860px) {
+  .pay-upi-setup { grid-template-columns: 1fr; }
+  .pay-qr { flex-direction: column; text-align: center; }
+  .invoice-print .select { max-width: 150px; }
+}
+
+/* Thermal receipts (80 mm / 58 mm rolls). Shown on screen at the printed width; printPaper() sizes the page. */
+.receipt-stage { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 8px 0 24px; }
+.receipt { box-sizing: content-box; width: 72mm; padding: 4mm; background: #fff; color: #000; border: 1px solid var(--line); border-radius: 4px;
+  box-shadow: 0 6px 20px rgba(31, 26, 43, .08); font-family: ui-monospace, 'SF Mono', Menlo, Consolas, 'Courier New', monospace; font-size: 9pt; line-height: 1.35;
+  display: flex; flex-direction: column; gap: .6mm; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.receipt-58 { width: 48mm; padding: 3mm; font-size: 8pt; }
+.receipt.is-void { background: repeating-linear-gradient(-45deg, #fff, #fff 6mm, #f6f6f6 6mm, #f6f6f6 7mm); }
+.rc-center { text-align: center; display: flex; flex-direction: column; align-items: center; }
+.rc-salon { font-size: 1.3em; font-weight: 800; letter-spacing: .02em; }
+.rc-kind { font-weight: 800; letter-spacing: .14em; text-transform: uppercase; margin: .5mm 0; }
+.rc-row { display: flex; justify-content: space-between; align-items: baseline; gap: 2mm; }
+.rc-row > span:last-child { text-align: right; }
+.rc-name { flex: 1; min-width: 0; font-weight: 600; }
+.rc-trunc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rc-nowrap { white-space: nowrap; }
+.rc-qty { display: inline-block; min-width: 3ch; margin-right: 2.5ch; text-align: right; }
+.rc-head { font-weight: 700; text-transform: uppercase; font-size: .85em; letter-spacing: .04em; }
+.rc-line { padding: .4mm 0; }
+.rc-small { font-size: .85em; }
+.rc-strong { font-weight: 700; }
+.rc-total { font-size: 1.25em; font-weight: 800; }
+.rc-rule { border-top: 1px dashed #000; margin: 1.2mm 0; }
+.rc-rule.rc-double { border-top: 3px double #000; }
+.rc-gst { display: grid; grid-template-columns: .8fr 1.5fr 1.2fr 1.2fr; gap: 1mm; }
+.rc-gst > span:not(:first-child) { text-align: right; }
+.rc-upi { gap: 1mm; padding: 1.5mm 0 .5mm; }
+@media print {
+  html[data-print='receipt'] body, html[data-print='receipt'] .shell, html[data-print='receipt'] .main { background: #fff; margin: 0; padding: 0; }
+  html[data-print='receipt'] .page { padding: 0 !important; max-width: none; }
+  .receipt-stage { padding: 0; display: block; }
+  .receipt { margin: 0 auto; padding: 0; border: 0; border-radius: 0; box-shadow: none; }
+  .receipt.is-void { background: none; }
+  .receipt svg { width: 32mm; height: 32mm; }
+  .receipt-58 svg { width: 28mm; height: 28mm; }
+}
+
 /* manage screens ---------------------------------------------------------- */
 .link-btn { border: 0; background: none; padding: 0; color: var(--peacock); font-weight: 550; cursor: pointer; }
 .link-btn:hover { text-decoration: underline; text-underline-offset: 3px; }

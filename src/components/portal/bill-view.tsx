@@ -4,6 +4,8 @@ import { Badge, Button } from '@/components/ui/ui';
 import { Icon } from '@/components/ui/icons';
 import { amountInWords, money2, taxByRate } from '@/lib/billing';
 import { billDocument } from '@/lib/gst';
+import { isValidVpa } from '@/lib/upi';
+import { UpiQr } from '@/components/ui/upi-qr';
 import { formatPhone } from '@/lib/phone';
 import { fmtDateTime } from '@/lib/time';
 import type { BillType, InvoiceStatus, PayMethod } from '@/lib/types';
@@ -11,7 +13,12 @@ import { METHOD_LABEL } from '@/lib/types';
 import { PortalHeader } from './portal';
 
 export interface CustomerBill {
-  salon: { name: string; legalName: string | null; gstin: string | null; address: string | null; city: string | null; state: string | null; pincode: string | null; phone: string | null; slug: string; timezone: string };
+  salon: {
+    name: string; legalName: string | null; gstin: string | null; address: string | null; city: string | null; state: string | null; pincode: string | null;
+    phone: string | null; slug: string; timezone: string;
+    /** The salon's own UPI ID: an unpaid bill shows a QR that pays the salon directly. */
+    upiVpa?: string | null; upiName?: string | null;
+  };
   invoice: {
     invoice_no: string; created_at: string; status: InvoiceStatus; prices_include_tax: boolean;
     subtotal: number; discount_total: number; taxable_total: number; cgst: number; sgst: number; igst: number; round_off: number; total: number; paid_total: number;
@@ -127,6 +134,12 @@ export function BillView({ bill, phone, base }: { bill: CustomerBill; phone?: st
               <span className="strong num">{money2(balance > 0 && inv.status !== 'void' ? balance : inv.paid_total)}</span>
             </div>
           </div>
+          {balance > 0 && inv.status !== 'void' && isValidVpa(salon.upiVpa) && (
+            <div className="pt-bill-upi">
+              <UpiQr vpa={salon.upiVpa} name={salon.upiName || salon.name} amount={balance} note={`Bill ${inv.invoice_no}`} size={176} appLink />
+              <p className="tiny muted">Pays {salon.name} directly. The salon marks the bill paid once they see your payment.</p>
+            </div>
+          )}
           <p className="tiny muted" style={{ textAlign: 'center' }}>Thank you for visiting {salon.name}.</p>
         </article>
         <div className="no-print" style={{ textAlign: 'center' }}>
