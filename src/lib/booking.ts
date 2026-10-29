@@ -103,7 +103,7 @@ export async function getAvailability(db: SupabaseClient, catalog: BookingCatalo
     durationMin: duration,
     branchHours: branch.business_hours,
     staff: staff.map((s) => ({ id: s.id, hours: s.working_hours })),
-    busy: (appts ?? []).map((a) => ({ staffId: a.staff_id as string, start: new Date(a.start_at), end: new Date(a.end_at) })),
+    busy: ((appts ?? []) as { staff_id: string; start_at: string; end_at: string }[]).map((a) => ({ staffId: a.staff_id, start: new Date(a.start_at), end: new Date(a.end_at) })),
   });
 }
 

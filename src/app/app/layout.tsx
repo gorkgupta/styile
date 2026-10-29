@@ -25,7 +25,7 @@ export default async function SalonLayout({ children }: { children: React.ReactN
       user={{ name: ctx.user.name }}
       role={ctx.role}
       memberships={ctx.memberships}
-      inboxUnread={(inbox.data ?? []).reduce((s, c) => s + (c.unread_count || 0), 0)}
+      inboxUnread={((inbox.data ?? []) as { unread_count: number | null }[]).reduce((s, c) => s + (c.unread_count || 0), 0)}
       queueCount={queueCount ?? 0}
       isPlatformAdmin={ctx.isPlatformAdmin}
     >

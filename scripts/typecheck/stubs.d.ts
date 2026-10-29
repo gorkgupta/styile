@@ -2,9 +2,19 @@
 // Used only by scripts/typecheck (checks our own code's contracts); real builds use the real packages.
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+// Event handler props get a contextual (any) type, as with real React, so only genuinely untyped callbacks
+// (e.g. over untyped Supabase rows) are reported as implicit any.
+type StubHandler = (e: any) => void;
+interface StubDomAttrs {
+  onChange?: StubHandler; onClick?: StubHandler; onInput?: StubHandler; onKeyDown?: StubHandler; onKeyUp?: StubHandler;
+  onSubmit?: StubHandler; onBlur?: StubHandler; onFocus?: StubHandler; onPaste?: StubHandler; onMouseDown?: StubHandler;
+  onMouseEnter?: StubHandler; onMouseLeave?: StubHandler; onPointerDown?: StubHandler; onScroll?: StubHandler; onLoad?: StubHandler;
+  onError?: StubHandler; onDragOver?: StubHandler; onDrop?: StubHandler; onTouchStart?: StubHandler; onContextMenu?: StubHandler;
+  ref?: any; [attr: string]: any;
+}
 declare namespace JSX {
   type Element = any;
-  interface IntrinsicElements { [name: string]: any }
+  interface IntrinsicElements { [name: string]: StubDomAttrs }
   interface ElementChildrenAttribute { children: {} }
   interface IntrinsicAttributes { key?: any }
 }
@@ -18,13 +28,13 @@ declare module 'react' {
   export type KeyboardEvent<T = any> = any;
   export type MouseEvent<T = any> = any;
   export type ComponentProps<T = any> = any;
-  export type SVGProps<T = any> = Record<string, any>;
-  export type HTMLAttributes<T = any> = Record<string, any>;
-  export type AnchorHTMLAttributes<T = any> = Record<string, any>;
-  export type ButtonHTMLAttributes<T = any> = Record<string, any> & { type?: 'button' | 'submit' | 'reset'; disabled?: boolean; className?: string; children?: any };
-  export type InputHTMLAttributes<T = any> = Record<string, any>;
-  export type SelectHTMLAttributes<T = any> = Record<string, any> & { children?: any };
-  export type TextareaHTMLAttributes<T = any> = Record<string, any>;
+  export type SVGProps<T = any> = StubDomAttrs;
+  export type HTMLAttributes<T = any> = StubDomAttrs;
+  export type AnchorHTMLAttributes<T = any> = StubDomAttrs;
+  export type ButtonHTMLAttributes<T = any> = StubDomAttrs & { type?: 'button' | 'submit' | 'reset'; disabled?: boolean; className?: string; children?: any };
+  export type InputHTMLAttributes<T = any> = StubDomAttrs;
+  export type SelectHTMLAttributes<T = any> = StubDomAttrs & { children?: any };
+  export type TextareaHTMLAttributes<T = any> = StubDomAttrs;
   export type Dispatch<A> = (value: A) => void;
   export type SetStateAction<S> = S | ((prev: S) => S);
   export type RefObject<T> = { current: T };
@@ -91,7 +101,7 @@ declare module 'next/navigation' {
   export function useSearchParams(): URLSearchParams;
 }
 declare module 'next/cache' { export function revalidatePath(p: string, t?: 'page' | 'layout'): void; export function revalidateTag(t: string): void; }
-declare module 'next/link' { const Link: (props: { href: string; children?: any; [k: string]: any }) => any; export default Link; }
+declare module 'next/link' { const Link: (props: StubDomAttrs & { href: string; children?: any }) => any; export default Link; }
 
 declare module '@supabase/supabase-js' {
   // Untyped Supabase (no generated Database type) returns `any` rows, like the real client.

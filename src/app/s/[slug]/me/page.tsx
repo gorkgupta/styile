@@ -101,8 +101,8 @@ export default async function Page({ params, searchParams }: { params: Promise<{
   }));
   const coinBalance = customers.reduce((s, c) => s + Number(c.coin_balance ?? 0), 0);
   const today = localDate(new Date(), site.timezone);
-  const packages = (pkgs.data ?? []).map(normalizeClientPackage).filter((p) => packageState(p, today) === 'active');
-  const allCards = (cards.data ?? []).map(normalizeMembership);
+  const packages = ((pkgs.data ?? []) as unknown[]).map(normalizeClientPackage).filter((p) => packageState(p, today) === 'active');
+  const allCards = ((cards.data ?? []) as unknown[]).map(normalizeMembership);
   const membership = activeMembership(allCards, today) ?? allCards.find((m) => membershipState(m, today) === 'upcoming') ?? null;
 
   const meta = (user.user_metadata ?? {}) as { full_name?: string };

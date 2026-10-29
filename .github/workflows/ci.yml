@@ -49,15 +49,17 @@ jobs:
         with:
           node-version: 22
       - run: npm install --no-audit --no-fund
-      # next build generates next-env.d.ts (React/Next JSX types) and type-checks the app.
-      - name: Next.js production build (includes type check)
-        run: |
-          set -o pipefail
-          npx next build 2>&1 | tee ci-report.txt
+      # Type-check everything first so every error is listed at once (next build stops at the first one).
+      # next-env.d.ts is normally written by next build; it brings in the Next/React JSX types.
       - name: Type check everything incl. tests
         run: |
           set -o pipefail
+          printf '/// <reference types="next" />\n/// <reference types="next/image-types/global" />\n' > next-env.d.ts
           npx tsc --noEmit --pretty false 2>&1 | tee ci-report.txt
+      - name: Next.js production build
+        run: |
+          set -o pipefail
+          npx next build 2>&1 | tee ci-report.txt
       - name: Cloudflare Workers build (OpenNext)
         run: |
           set -o pipefail
