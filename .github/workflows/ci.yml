@@ -1,0 +1,53 @@
+name: CI
+
+# Builds the real app and runs every test on each pull request and on main.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests (logic + database)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - name: Unit and assistant tests
+        run: npm test
+      - name: Database tests (schema, security, billing) on PostgreSQL 16
+        run: |
+          ls /usr/lib/postgresql/16/bin/initdb || (sudo apt-get update && sudo apt-get install -y postgresql-16)
+          sudo bash scripts/db-test/run.sh | tee db-test.log
+          grep -q "ALL DATABASE TESTS PASSED" db-test.log
+
+  build:
+    name: Type check and build
+    runs-on: ubuntu-24.04
+    env:
+      # Placeholder values so the build can run; real values are set in Cloudflare.
+      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder
+      NEXT_PUBLIC_APP_URL: https://styile.com
+      NEXT_PUBLIC_ROOT_DOMAIN: styile.com
+      NEXT_PUBLIC_APP_NAME: Styile
+      NEXT_TELEMETRY_DISABLED: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - name: Type check (real Next.js, React and Supabase types)
+        run: npx tsc --noEmit
+      - name: Next.js production build
+        run: npx next build
+      - name: Cloudflare Workers build (OpenNext)
+        run: npx opennextjs-cloudflare build
