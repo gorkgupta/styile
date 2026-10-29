@@ -7,7 +7,9 @@ import { Topbar } from './shell';
 import { AppointmentSheet, NewAppointmentSheet, type MenuProps } from './appointment-sheets';
 import { useLiveRefresh } from './live';
 import { staffWindows } from '@/lib/availability';
-import { addDays, fmtTime, localMinutes, minutesToHhmm, relativeDay, fmtDateLong, dayKeyOf } from '@/lib/time';
+import { addDays, fmtTime, localMinutes, minutesToHhmm, fmtDateLong, dayKeyOf } from '@/lib/time';
+import { useT } from '@/lib/i18n/react';
+import { relDay } from '@/lib/i18n/core';
 import type { AppointmentFull, Hours, PayMethod } from '@/lib/types';
 import { NewEventSheet } from './events';
 
@@ -30,6 +32,7 @@ export interface CalendarProps {
 
 export function CalendarBoard({ salonId, date, today, nowIso, branchHours, appointments, menu, canBill, myStaffId, newEvent }: CalendarProps) {
   const [eventOpen, setEventOpen] = useState(false);
+  const t = useT();
   const router = useRouter();
   useLiveRefresh(salonId, ['appointments']);
   const [selected, setSelected] = useState<AppointmentFull | null>(null);
@@ -88,25 +91,25 @@ export function CalendarBoard({ salonId, date, today, nowIso, branchHours, appoi
   return (
     <>
       <Topbar
-        title={relativeDay(date, today) === 'Today' ? 'Today’s calendar' : relativeDay(date, today)}
-        subtitle={fmtDateLong(date)}
+        title={date === today ? t('cal.todays') : relDay(t, date, today)}
+        subtitle={fmtDateLong(date, t.locale)}
         actions={<>
-          {newEvent && <Button icon="heart" onClick={() => setEventOpen(true)}><span className="hide-mobile">New event</span></Button>}
-          <Button variant="primary" icon="plus" onClick={() => setDraft({ time: '', staffId: '' })}><span className="hide-mobile">New appointment</span></Button>
+          {newEvent && <Button icon="heart" onClick={() => setEventOpen(true)} aria-label={t('today.newEvent')}><span className="hide-mobile">{t('today.newEvent')}</span></Button>}
+          <Button variant="primary" icon="plus" onClick={() => setDraft({ time: '', staffId: '' })} aria-label={t('appt.new')}><span className="hide-mobile">{t('appt.new')}</span></Button>
         </>}
       />
       <div className="page">
         <div className="between" style={{ flexWrap: 'wrap' }}>
           <div className="row">
-            <Button size="sm" icon="chevronLeft" aria-label="Previous day" onClick={() => go(addDays(date, -1))} />
-            <Button size="sm" onClick={() => go(today)} disabled={date === today}>Today</Button>
-            <Button size="sm" icon="chevronRight" aria-label="Next day" onClick={() => go(addDays(date, 1))} />
-            <input type="date" className="input input-sm" style={{ width: 160 }} value={date} onChange={(e) => e.target.value && go(e.target.value)} aria-label="Pick a date" />
+            <Button size="sm" icon="chevronLeft" aria-label={t('cal.prevDay')} onClick={() => go(addDays(date, -1))} />
+            <Button size="sm" onClick={() => go(today)} disabled={date === today}>{t('time.today')}</Button>
+            <Button size="sm" icon="chevronRight" aria-label={t('cal.nextDay')} onClick={() => go(addDays(date, 1))} />
+            <input type="date" className="input input-sm" style={{ width: 160 }} value={date} onChange={(e) => e.target.value && go(e.target.value)} aria-label={t('cal.pickDate')} />
           </div>
           {myStaffId && (
-            <div className="segmented" role="group" aria-label="Whose calendar">
-              <button aria-pressed={onlyMine} onClick={() => setOnlyMine(true)}>My column</button>
-              <button aria-pressed={!onlyMine} onClick={() => setOnlyMine(false)}>Everyone</button>
+            <div className="segmented" role="group" aria-label={t('cal.whose')}>
+              <button aria-pressed={onlyMine} onClick={() => setOnlyMine(true)}>{t('cal.mine')}</button>
+              <button aria-pressed={!onlyMine} onClick={() => setOnlyMine(false)}>{t('cal.everyone')}</button>
             </div>
           )}
         </div>
@@ -120,7 +123,7 @@ export function CalendarBoard({ salonId, date, today, nowIso, branchHours, appoi
                   <Avatar name={s.name} color={s.color} size="sm" />
                   <div style={{ minWidth: 0 }}>
                     <div className="strong small truncate">{s.name}</div>
-                    <div className="tiny muted">{counts(s.id)} booked</div>
+                    <div className="tiny muted">{t('cal.booked', { count: counts(s.id) })}</div>
                   </div>
                 </div>
               ))}
@@ -162,7 +165,7 @@ export function CalendarBoard({ salonId, date, today, nowIso, branchHours, appoi
             </div>
           </div>
         </div>
-        {!columns.length && <p className="muted">Add your team under Team to start booking.</p>}
+        {!columns.length && <p className="muted">{t('cal.noTeam')}</p>}
       </div>
 
       {newEvent && <NewEventSheet open={eventOpen} onClose={() => setEventOpen(false)} menu={menu} today={today} methods={newEvent.methods} waConnected={newEvent.waConnected} />}

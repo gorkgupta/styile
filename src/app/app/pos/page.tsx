@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { PosScreen, type PosProps } from '@/components/app/pos';
 import { requirePermission } from '@/lib/context';
+import { getT } from '@/lib/i18n/server';
 import { getClientBenefits, getMenu, getTeam } from '@/lib/queries';
 import { fmtTime, localDate } from '@/lib/time';
 import { serviceGstRate } from '@/lib/gst';
@@ -36,7 +37,7 @@ export default async function PosPage({ searchParams }: { searchParams: Promise<
       const people = [...(e.appts ?? [])].filter((a) => !['cancelled', 'no_show'].includes(a.status)).sort((a, b) => a.start_at.localeCompare(b.start_at));
       prefill = {
         appointmentId: null, eventId: e.id, customer: e.customer,
-        context: `Checkout · ${e.title} · ${people.length} ${people.length === 1 ? 'person' : 'people'}`,
+        context: getT(ctx.locale)('pos.ctxEvent', { title: e.title, count: people.length }),
         lines: [
           ...people.flatMap((a) => [...(a.services ?? [])].sort((x, y) => x.sort - y.sort).map((sv) => ({
             serviceId: sv.service_id, name: a.guest_name ? `${sv.name} · ${a.guest_name}` : sv.name, price: Number(sv.price), staffId: a.staff_id,
@@ -61,7 +62,11 @@ export default async function PosPage({ searchParams }: { searchParams: Promise<
       prefill = {
         appointmentId: a.id,
         customer: a.customer,
-        context: `Checkout · ${a.customer?.name ?? 'Client'} · ${fmtTime(a.start_at, ctx.salon.timezone)}${stylist ? ` with ${stylist.name}` : ''}`,
+        context: (() => {
+          const t = getT(ctx.locale);
+          const vars = { name: a.customer?.name ?? t('appt.client'), time: fmtTime(a.start_at, ctx.salon.timezone), stylist: stylist?.name ?? '' };
+          return stylist ? t('pos.ctxApptWith', vars) : t('pos.ctxAppt', vars);
+        })(),
         lines: [...(a.services ?? [])].sort((x, y) => x.sort - y.sort).map((s) => ({
           serviceId: s.service_id, name: s.name, price: Number(s.price), staffId: a.staff_id,
           gstRate: menu.services.find((m) => m.id === s.service_id)?.gst_rate ?? null,

@@ -1122,6 +1122,37 @@ select t.ok((select count(*) from public.events) = 1 and (select count(*) from p
 select t.fails(format($q$select public.record_advance(%L, %L, %L, 500, 'cash')$q$, :'salon_p', :'deki', :'ev_id'), 'client can''t record an advance');
 reset role;
 
+-- ===== Languages (0015): each user picks their own; owners pick the client pages' language =====
+reset role;
+select t.ok((select default_locale from public.salons where id = :'salon_a') = 'en', 'client pages default to English');
+select t.ok((select locale from public.profiles where id = '00000000-0000-0000-0000-00000000000a') is null, 'staff language starts unset (English)');
+set role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-00000000000c","role":"authenticated"}', false);
+update public.profiles set locale = 'bn' where id = '00000000-0000-0000-0000-00000000000c';
+select t.ok((select locale from public.profiles where id = '00000000-0000-0000-0000-00000000000c') = 'bn', 'user can set their own language');
+update public.profiles set locale = 'hi' where id = '00000000-0000-0000-0000-00000000000a';
+select t.fails(format('update public.profiles set locale = %L where id = %L', 'fr', '00000000-0000-0000-0000-00000000000c'), 'language must be en, hi, ne or bn');
+update public.salons set default_locale = 'ne' where id = :'salon_a';
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-00000000000b","role":"authenticated"}', false);
+update public.profiles set locale = 'ne' where id = '00000000-0000-0000-0000-00000000000c';
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-00000000000d","role":"authenticated"}', false);
+update public.profiles set locale = 'ne' where id = '00000000-0000-0000-0000-00000000000a';
+update public.salons set default_locale = 'ne' where id = :'salon_a';
+reset role;
+select t.ok((select locale from public.profiles where id = '00000000-0000-0000-0000-00000000000a') is null, 'a teammate can''t change someone else''s language');
+select t.ok((select locale from public.profiles where id = '00000000-0000-0000-0000-00000000000c') = 'bn', 'another salon''s owner can''t change a user''s language');
+select t.ok((select default_locale from public.salons where id = :'salon_a') = 'en', 'stylists and clients can''t change the client pages'' language');
+set role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-00000000000a","role":"authenticated"}', false);
+update public.salons set default_locale = 'bn' where id = :'salon_a';
+select t.ok((select default_locale from public.salons where id = :'salon_a') = 'bn', 'owner can set the client pages'' language');
+select t.fails(format('update public.salons set default_locale = %L where id = %L', 'xx', :'salon_a'), 'client pages'' language must be en, hi, ne or bn');
+select t.fails(format('update public.salons set default_locale = null where id = %L', :'salon_a'), 'client pages always have a language');
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-00000000000c","role":"authenticated"}', false);
+update public.profiles set locale = null where id = '00000000-0000-0000-0000-00000000000c';
+select t.ok((select locale from public.profiles where id = '00000000-0000-0000-0000-00000000000c') is null, 'user can go back to English');
+reset role;
+
 -- ===== Anonymous =====
 reset role;
 set role anon;

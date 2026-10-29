@@ -7,7 +7,7 @@ import { fmtCoins } from '@/lib/coins';
 import { fmtDateYear } from '@/lib/periods';
 import { fmtTime } from '@/lib/time';
 import type { CoinKind, PayMethod } from '@/lib/types';
-import { COIN_KIND_LABEL, METHOD_LABEL } from '@/lib/types';
+import { useT } from '@/lib/i18n/react';
 
 export interface CoinRow {
   id: string; kind: CoinKind; coins: number; balance_after: number; amount_paid: number | null; method: PayMethod | null;
@@ -27,31 +27,32 @@ export function CoinHistoryList({ rows, tz, billHref, showReference = true }: {
   billHref?: (invoiceId: string) => string;
   showReference?: boolean;
 }) {
+  const t = useT();
   return (
     <ul className="list coin-tx-list">
-      {rows.map((t) => {
-        const plus = t.coins > 0;
-        const bill = t.invoice_id && t.invoice_no
-          ? (billHref ? <Link href={billHref(t.invoice_id)} className="num nowrap">Bill {t.invoice_no}</Link> : <span className="num nowrap">Bill {t.invoice_no}</span>)
+      {rows.map((r) => {
+        const plus = r.coins > 0;
+        const bill = r.invoice_id && r.invoice_no
+          ? (billHref ? <Link href={billHref(r.invoice_id)} className="num nowrap">{t('common.billNo', { no: r.invoice_no })}</Link> : <span className="num nowrap">{t('common.billNo', { no: r.invoice_no })}</span>)
           : null;
-        const detail = t.kind === 'load'
-          ? <span className="num">{money(t.amount_paid ?? t.coins)} by {t.method ? METHOD_LABEL[t.method] : 'cash'}{showReference && t.reference ? ` · ${t.reference}` : ''}</span>
-          : t.kind === 'spend' || t.kind === 'refund' ? bill
+        const detail = r.kind === 'load'
+          ? <span className="num">{t('coins.paidBy', { money: money(r.amount_paid ?? r.coins), method: t(`method.${r.method ?? 'cash'}`) })}{showReference && r.reference ? ` · ${r.reference}` : ''}</span>
+          : r.kind === 'spend' || r.kind === 'refund' ? bill
           : null;
         return (
-          <li key={t.id} className="coin-tx">
-            <span className={`coin-tx-icon is-${plus ? 'in' : 'out'}`} aria-hidden><Icon name={KIND_ICON[t.kind]} size={15} /></span>
+          <li key={r.id} className="coin-tx">
+            <span className={`coin-tx-icon is-${plus ? 'in' : 'out'}`} aria-hidden><Icon name={KIND_ICON[r.kind]} size={15} /></span>
             <div className="grow" style={{ minWidth: 0 }}>
-              <div className="strong small">{COIN_KIND_LABEL[t.kind]}</div>
+              <div className="strong small">{t(`coinKind.${r.kind}`)}</div>
               <div className="tiny muted coin-tx-meta">
-                <span className="num nowrap">{fmtDateYear(t.created_at, tz)}, {fmtTime(t.created_at, tz)}</span>
+                <span className="num nowrap">{fmtDateYear(r.created_at, tz, t.locale)}, {fmtTime(r.created_at, tz)}</span>
                 {detail && <> · {detail}</>}
               </div>
-              {t.note && t.kind !== 'bonus' && !(t.kind === 'refund' && bill) && <div className="tiny ink2 coin-tx-note">“{t.note}”</div>}
+              {r.note && r.kind !== 'bonus' && !(r.kind === 'refund' && bill) && <div className="tiny ink2 coin-tx-note">“{r.note}”</div>}
             </div>
             <div className="right nowrap">
-              <div className={`num strong ${plus ? 'success-text' : ''}`}>{signedCoins(t.coins)}</div>
-              <div className="tiny muted num">Bal {fmtCoins(t.balance_after)}</div>
+              <div className={`num strong ${plus ? 'success-text' : ''}`}>{signedCoins(r.coins)}</div>
+              <div className="tiny muted num">{t('coins.bal', { n: fmtCoins(r.balance_after) })}</div>
             </div>
           </li>
         );

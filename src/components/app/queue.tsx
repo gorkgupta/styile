@@ -11,6 +11,7 @@ import { removeFromQueue, startWalkIn } from '@/actions/appointments';
 import { fmtTime, fmtDateLong } from '@/lib/time';
 import { money } from '@/lib/billing';
 import type { AppointmentFull } from '@/lib/types';
+import { useT } from '@/lib/i18n/react';
 
 export interface QueueProps {
   salonId: string; today: string; nowIso: string; appointments: AppointmentFull[]; menu: MenuProps; canBill: boolean;
@@ -18,6 +19,7 @@ export interface QueueProps {
 
 export function QueueBoard({ salonId, today, nowIso, appointments, menu, canBill }: QueueProps) {
   useLiveRefresh(salonId, ['appointments']);
+  const t = useT();
   const [adding, setAdding] = useState(false);
   const [starting, setStarting] = useState<AppointmentFull | null>(null);
   const [staffId, setStaffId] = useState('');
@@ -40,20 +42,20 @@ export function QueueBoard({ salonId, today, nowIso, appointments, menu, canBill
 
   return (
     <>
-      <Topbar title="Walk-in queue" subtitle={fmtDateLong(today)}
-        actions={<Button variant="primary" icon="plus" onClick={() => setAdding(true)}>Add walk-in</Button>} />
+      <Topbar title={t('queue.title')} subtitle={fmtDateLong(today, t.locale)}
+        actions={<Button variant="primary" icon="plus" onClick={() => setAdding(true)}>{t('queue.add')}</Button>} />
       <div className="page">
         <div className="row-wrap">
-          <Badge tone="marigold">{waiting.length} waiting</Badge>
-          <Badge tone="peacock">{serving.length} in a chair</Badge>
-          <Badge>{servedWalkIns} walk-ins served today</Badge>
+          <Badge tone="marigold">{t('queue.nWaiting', { count: waiting.length })}</Badge>
+          <Badge tone="peacock">{t('queue.nInChair', { count: serving.length })}</Badge>
+          <Badge>{t('queue.served', { count: servedWalkIns })}</Badge>
           <span className="small muted" style={{ marginLeft: 'auto' }}>
-            Free now: {freeNow.length ? freeNow.map((s) => s.name).join(', ') : 'nobody'}
+            {t('queue.freeNow', { names: freeNow.length ? freeNow.map((s) => s.name).join(', ') : t('queue.nobody') })}
           </span>
         </div>
 
         <div className="split">
-          <Panel title="Waiting" flush>
+          <Panel title={t('status.waiting')} flush>
             {waiting.length ? (
               <ul className="list">
                 {waiting.map((w, i) => {
@@ -63,33 +65,33 @@ export function QueueBoard({ salonId, today, nowIso, appointments, menu, canBill
                     <li key={w.id} className="row" style={{ gap: 14 }}>
                       <span className="token">{w.token_no}</span>
                       <div className="grow">
-                        <div className="row"><span className="strong truncate">{w.customer.name}</span>{i === 0 && <Badge tone="peacock">Next</Badge>}</div>
+                        <div className="row"><span className="strong truncate">{w.customer.name}</span>{i === 0 && <Badge tone="peacock">{t('queue.next')}</Badge>}</div>
                         <div className="small muted truncate">
-                          {w.services.map((s) => s.name).join(', ')}{pref ? ` · prefers ${pref.name}` : ''}
+                          {w.services.map((s) => s.name).join(', ')}{pref ? ` · ${t('queue.prefers', { name: pref.name })}` : ''}
                         </div>
                         <div className={`small num ${mins > 30 ? 'strong' : 'muted'}`} style={mins > 30 ? { color: 'var(--danger)' } : undefined}>
-                          Waiting {mins} min · arrived {fmtTime(w.start_at, tz)}
+                          {t('queue.waitArrived', { m: mins, time: fmtTime(w.start_at, tz) })}
                         </div>
                       </div>
                       <div className="row">
                         <Button size="sm" variant="ghost" onClick={() => start(async () => {
                           const r = await removeFromQueue(w.id);
-                          if (!r.ok) toast(r.error, 'error'); else { toast(`${w.customer.name} removed from queue`); router.refresh(); }
-                        })}>Left</Button>
-                        <Button size="sm" variant="primary" onClick={() => { setStarting(w); setStaffId(w.staff_id && freeNow.some((s) => s.id === w.staff_id) ? w.staff_id : freeNow[0]?.id ?? ''); }}>Start</Button>
+                          if (!r.ok) toast(t.err(r.error), 'error'); else { toast(t('queue.removed', { name: w.customer.name })); router.refresh(); }
+                        })}>{t('queue.left')}</Button>
+                        <Button size="sm" variant="primary" onClick={() => { setStarting(w); setStaffId(w.staff_id && freeNow.some((s) => s.id === w.staff_id) ? w.staff_id : freeNow[0]?.id ?? ''); }}>{t('queue.start')}</Button>
                       </div>
                     </li>
                   );
                 })}
               </ul>
             ) : (
-              <Empty icon="walkin" title="No one is waiting" action={<Button icon="plus" onClick={() => setAdding(true)}>Add walk-in</Button>}>
-                Give each walk-in a token so they know their place in line.
+              <Empty icon="walkin" title={t('queue.noneWaiting')} action={<Button icon="plus" onClick={() => setAdding(true)}>{t('queue.add')}</Button>}>
+                {t('queue.noneWaitingBody')}
               </Empty>
             )}
           </Panel>
 
-          <Panel title="In the chair" flush>
+          <Panel title={t('today.inChair')} flush>
             {serving.length ? (
               <ul className="list">
                 {serving.map((a) => {
@@ -99,29 +101,29 @@ export function QueueBoard({ salonId, today, nowIso, appointments, menu, canBill
                       <Avatar name={s?.name ?? '?'} color={s?.color} size="sm" />
                       <div className="grow">
                         <div className="strong truncate">{a.customer.name}</div>
-                        <div className="small muted truncate">{s?.name} · done by {fmtTime(a.end_at, tz)} · {money(a.services.reduce((x, y) => x + Number(y.price), 0))}</div>
+                        <div className="small muted truncate">{s?.name} · {t('queue.doneBy', { time: fmtTime(a.end_at, tz) })} · {money(a.services.reduce((x, y) => x + Number(y.price), 0))}</div>
                       </div>
-                      {canBill && <Link className="btn btn-secondary btn-sm" href={`/app/pos?appointment=${a.id}`}>Check out</Link>}
+                      {canBill && <Link className="btn btn-secondary btn-sm" href={`/app/pos?appointment=${a.id}`}>{t('appt.checkOut')}</Link>}
                     </li>
                   );
                 })}
               </ul>
-            ) : <p className="panel-body small muted">Nobody is being served right now.</p>}
+            ) : <p className="panel-body small muted">{t('queue.nobodyServed')}</p>}
           </Panel>
         </div>
       </div>
 
       <NewAppointmentSheet open={adding} mode="walkin" onClose={() => setAdding(false)} menu={menu} date={today} />
-      <Dialog open={!!starting} onClose={() => setStarting(null)} title={`Start service for ${starting?.customer.name ?? ''}`}
-        footer={<><Button variant="ghost" onClick={() => setStarting(null)}>Not yet</Button>
+      <Dialog open={!!starting} onClose={() => setStarting(null)} title={t('queue.startFor', { name: starting?.customer.name ?? '' })}
+        footer={<><Button variant="ghost" onClick={() => setStarting(null)}>{t('queue.notYet')}</Button>
           <Button variant="primary" loading={pending} onClick={() => start(async () => {
             if (!starting) return;
             const r = await startWalkIn(starting.id, staffId);
-            if (!r.ok) return toast(r.error, 'error');
-            toast(r.message ?? 'Started'); setStarting(null); router.refresh();
-          })}>Start service</Button></>}>
-        <StaffSelect staff={menu.staff} value={staffId} onChange={setStaffId} label="Who will serve them?" />
-        {!freeNow.length && <p className="small muted">Everyone looks busy — the stylist you pick must be free now.</p>}
+            if (!r.ok) return toast(t.err(r.error), 'error');
+            toast(t('err.serviceStarted')); setStarting(null); router.refresh();
+          })}>{t('appt.start')}</Button></>}>
+        <StaffSelect staff={menu.staff} value={staffId} onChange={setStaffId} label={t('queue.whoServes')} />
+        {!freeNow.length && <p className="small muted">{t('queue.allBusy')}</p>}
       </Dialog>
     </>
   );

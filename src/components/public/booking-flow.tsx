@@ -6,10 +6,13 @@ import { Avatar, Button, Notice, TextField, cx } from '@/components/ui/ui';
 import { Icon } from '@/components/ui/icons';
 import { bookOnline, getPublicSlots, getStylistNextFree, type BookOnlineResult } from '@/actions/public';
 import { qualifiedStaff, type Slot } from '@/lib/availability';
-import { experienceLabel, fmtNextFree, type NextFree, type NextFreeResult, type PublicStylist } from '@/lib/stylists';
+import { type NextFree, type NextFreeResult, type PublicStylist } from '@/lib/stylists';
 import { money } from '@/lib/billing';
 import { formatPhone, initials } from '@/lib/phone';
-import { dayKeyOf, fmtDateLong, fmtDateShort, fmtHhmm } from '@/lib/time';
+import { addDays, dateParts, dayKeyOf, fmtDateLong, fmtDateShort, fmtDateTime, fmtHhmm } from '@/lib/time';
+import { useT } from '@/lib/i18n/react';
+import { fmtDurationT, type Translator } from '@/lib/i18n/core';
+import { LanguageSwitch } from '@/components/ui/lang-switch';
 import type { Hours } from '@/lib/types';
 import { usePhoneOtp } from './phone-otp';
 import { PhoneInput } from '@/components/ui/phone-input';
@@ -39,7 +42,6 @@ export interface BookingPageProps {
 }
 
 type Step = 1 | 2 | 3 | 4 | 5;
-const STEP_TITLES: Record<Exclude<Step, 5>, string> = { 1: 'Choose services', 2: 'Choose a stylist', 3: 'Pick a time', 4: 'Your details' };
 
 export function fmtDuration(min: number): string {
   const h = Math.floor(min / 60), m = min % 60;
@@ -47,10 +49,23 @@ export function fmtDuration(min: number): string {
   return m ? `${h} hr ${m} min` : `${h} hr`;
 }
 
-function hoursLabel(hours: Hours, date: string): string {
+function hoursLabel(t: Translator, hours: Hours, date: string): string {
   const w = hours[dayKeyOf(date)];
-  if (!w || !w.length) return 'Closed today';
-  return `Open today ${w.map(([a, b]) => `${fmtHhmm(a)} – ${fmtHhmm(b)}`).join(', ')}`;
+  if (!w || !w.length) return t('bk.closedToday');
+  return t('bk.openToday', { hours: w.map(([a, b]) => `${fmtHhmm(a)} – ${fmtHhmm(b)}`).join(', ') });
+}
+
+/** "Today 4:30 PM", "Tomorrow 11:00 AM", "Thu 10:00 AM" (this week), else "Thu, 5 Nov 10:00 AM" — like fmtNextFree, translated. */
+function nextFreeText(t: Translator, n: Pick<NextFree, 'date' | 'time'>, today: string): string {
+  const time = fmtHhmm(n.time);
+  if (n.date === today) return `${t('time.today')} ${time}`;
+  if (n.date === addDays(today, 1)) return `${t('time.tomorrow')} ${time}`;
+  return n.date < addDays(today, 7) ? `${dateParts(n.date, t.locale).wd} ${time}` : `${fmtDateShort(n.date, t.locale)} ${time}`;
+}
+
+function experienceText(t: Translator, years: number | null | undefined): string | null {
+  if (years == null) return null;
+  return years < 1 ? t('bk.newToTeam') : t('bk.yearsExp', { count: years });
 }
 
 /** Readable text colour on the salon's brand colour. */
@@ -81,6 +96,7 @@ function downloadIcs(opts: { id: string; start: string; end: string; title: stri
 }
 
 export function BookingFlow(p: BookingPageProps) {
+  const t = useT();
   const [step, setStep] = useState<Step>(p.initial?.step ?? 1);
   const [picked, setPicked] = useState<string[]>(p.initial?.serviceIds ?? []);
   const [cat, setCat] = useState<string>(() => {
@@ -133,9 +149,9 @@ export function BookingFlow(p: BookingPageProps) {
 
   const tabs = useMemo(() => {
     const list = p.categories.filter((c) => p.services.some((s) => s.category_id === c.id));
-    if (p.services.some((s) => !s.category_id || !p.categories.some((c) => c.id === s.category_id))) list.push({ id: 'other', name: 'Other' });
+    if (p.services.some((s) => !s.category_id || !p.categories.some((c) => c.id === s.category_id))) list.push({ id: 'other', name: t('common.other') });
     return list;
-  }, [p.categories, p.services]);
+  }, [p.categories, p.services, t]);
   const visible = p.services.filter((s) => (cat === 'other' ? !s.category_id || !p.categories.some((c) => c.id === s.category_id) : s.category_id === cat));
   const countIn = (catId: string) => picked.filter((id) => {
     const s = p.services.find((x) => x.id === id);
@@ -192,7 +208,7 @@ export function BookingFlow(p: BookingPageProps) {
 
   async function confirm() {
     if (!slot) { go(3); return; }
-    if (name.trim().length < 2) { setNameError('Enter your name so the salon knows who is coming.'); return; }
+    if (name.trim().length < 2) { setNameError(t('bk.nameNeeded')); return; }
     setNameError(null);
     if (!p.me && !verified) {
       if (otp.stage === 'phone') { await otp.send(); return; }
@@ -204,17 +220,17 @@ export function BookingFlow(p: BookingPageProps) {
     const r = await bookOnline({ slug: p.salon.slug, serviceIds: picked, staffId, start: slot.start, name: name.trim(), notes: notes.trim() || undefined });
     setBooking(false);
     if (r.ok && r.data) { setResult(r.data); go(5); return; }
-    const error = r.ok ? 'Something went wrong. Please try again.' : r.error;
+    const error = r.ok ? t('err.generic') : r.error;
     if (/taken|not available/i.test(error)) {
-      setTimeNotice('Sorry, someone just booked that time. Please pick another one.');
+      setTimeNotice(t('bk.timeTaken'));
       setSlot(null);
       go(3); // returning to the time step reloads free times
       return;
     }
-    setBookError(error);
+    setBookError(t.err(error));
   }
 
-  const whenLabel = slot ? `${fmtDateShort(date)}, ${fmtHhmm(slot.time)}` : null;
+  const whenLabel = slot ? `${fmtDateShort(date, t.locale)}, ${fmtHhmm(slot.time)}` : null;
   const addr = [p.salon.address, p.salon.city].filter(Boolean).join(', ');
 
   // ---------- Sticky action bar ----------
@@ -222,19 +238,19 @@ export function BookingFlow(p: BookingPageProps) {
   let barAction: ReactNode = null;
   if (step === 1) {
     barSummary = picked.length
-      ? <><span className="strong num">{money(total)}</span><span className="muted"> · {picked.length} service{picked.length > 1 ? 's' : ''} · {fmtDuration(minutes)}</span></>
-      : <span className="muted">Pick one or more services</span>;
-    barAction = <Button variant="primary" size="lg" disabled={!picked.length} onClick={() => go(2)}>Continue</Button>;
+      ? <><span className="strong num">{money(total)}</span><span className="muted"> · {t('bk.servicesCount', { count: picked.length })} · {fmtDurationT(t, minutes)}</span></>
+      : <span className="muted">{t('bk.pickServices')}</span>;
+    barAction = <Button variant="primary" size="lg" disabled={!picked.length} onClick={() => go(2)}>{t('common.continue')}</Button>;
   } else if (step === 2) {
-    barSummary = <><span className="strong">{stylist ? stylist.name : 'Anyone available'}</span><span className="muted"> · {money(total)}</span></>;
-    barAction = <Button variant="primary" size="lg" onClick={() => go(3)}>Continue</Button>;
+    barSummary = <><span className="strong">{stylist ? stylist.name : t('bk.anyone')}</span><span className="muted"> · {money(total)}</span></>;
+    barAction = <Button variant="primary" size="lg" onClick={() => go(3)}>{t('common.continue')}</Button>;
   } else if (step === 3) {
-    barSummary = slot ? <span className="strong">{whenLabel}</span> : <span className="muted">Pick a time</span>;
-    barAction = <Button variant="primary" size="lg" disabled={!slot} onClick={() => go(4)}>Continue</Button>;
+    barSummary = slot ? <span className="strong">{whenLabel}</span> : <span className="muted">{t('bk.step3')}</span>;
+    barAction = <Button variant="primary" size="lg" disabled={!slot} onClick={() => go(4)}>{t('common.continue')}</Button>;
   } else if (step === 4) {
     barSummary = <><span className="strong">{whenLabel}</span><span className="muted"> · {money(total)}</span></>;
     const signedIn = !!p.me || verified;
-    const label = signedIn || otp.stage === 'code' ? 'Confirm booking' : 'Send code on WhatsApp';
+    const label = signedIn || otp.stage === 'code' ? t('bk.confirm') : t('otp.send');
     barAction = (
       <Button variant="primary" size="lg" loading={otp.busy || booking} onClick={confirm} icon={!signedIn && otp.stage === 'phone' ? 'whatsapp' : undefined}
         disabled={!signedIn && (otp.stage === 'phone' ? !otp.valid : otp.code.length !== 6)}>{label}</Button>
@@ -250,11 +266,14 @@ export function BookingFlow(p: BookingPageProps) {
             <div className="grow">
               <h1>{p.salon.name}</h1>
               {addr && <p className="bk-head-line">{addr}</p>}
-              <p className="bk-head-line"><Icon name="clock" size={14} />{hoursLabel(p.hours, p.today)}</p>
+              <p className="bk-head-line"><Icon name="clock" size={14} />{hoursLabel(t, p.hours, p.today)}</p>
             </div>
-            {p.salon.phone && (
-              <a className="bk-call" href={`tel:+${p.salon.phone}`} aria-label={`Call ${p.salon.name}`}><Icon name="phone" size={18} /></a>
-            )}
+            <div className="bk-head-tools">
+              {p.salon.phone && (
+                <a className="bk-call" href={`tel:+${p.salon.phone}`} aria-label={t('bk.callSalon', { name: p.salon.name })}><Icon name="phone" size={18} /></a>
+              )}
+              <LanguageSwitch compact className="bk-lang" />
+            </div>
           </div>
         </div>
       </header>
@@ -263,11 +282,11 @@ export function BookingFlow(p: BookingPageProps) {
         {step < 5 && (
           <div className="bk-stepper">
             {step > 1 ? (
-              <button type="button" className="btn btn-ghost btn-sm btn-icon" aria-label="Back" onClick={() => go((step - 1) as Step)}><Icon name="chevronLeft" /></button>
+              <button type="button" className="btn btn-ghost btn-sm btn-icon" aria-label={t('common.back')} onClick={() => go((step - 1) as Step)}><Icon name="chevronLeft" /></button>
             ) : <span style={{ width: 4 }} />}
             <div className="grow">
-              <div className="tiny muted">Step {step} of 4</div>
-              <h2>{STEP_TITLES[step as Exclude<Step, 5>]}</h2>
+              <div className="tiny muted">{t('bk.stepOf', { step })}</div>
+              <h2>{t(`bk.step${step as Exclude<Step, 5>}`)}</h2>
             </div>
             <div className="bk-dots" aria-hidden>{[1, 2, 3, 4].map((i) => <span key={i} className={cx(i <= step && 'on')} />)}</div>
           </div>
@@ -279,14 +298,14 @@ export function BookingFlow(p: BookingPageProps) {
               <div className="bk-with">
                 <Avatar name={linkStylist.name} color={linkStylist.color} photo={linkStylist.photoUrl} />
                 <div className="grow" style={{ minWidth: 0 }}>
-                  <div className="strong truncate">Booking with {linkStylist.name}</div>
-                  <div className="small muted truncate">{linkStylist.title ?? 'Pick the services you’d like'}</div>
+                  <div className="strong truncate">{t('bk.bookingWith', { name: linkStylist.name })}</div>
+                  <div className="small muted truncate">{linkStylist.title ?? t('bk.pickYouLike')}</div>
                 </div>
-                <button type="button" className="link-btn small" onClick={() => setStaffChoice(null)}>Change</button>
+                <button type="button" className="link-btn small" onClick={() => setStaffChoice(null)}>{t('common.change')}</button>
               </div>
             )}
             {tabs.length > 1 && (
-              <div className="bk-tabs" role="tablist" aria-label="Service categories">
+              <div className="bk-tabs" role="tablist" aria-label={t('bk.categories')}>
                 {tabs.map((c) => (
                   <button key={c.id} type="button" role="tab" aria-selected={cat === c.id} className="chip" aria-pressed={cat === c.id} onClick={() => setCat(c.id)}>
                     {c.name}{countIn(c.id) > 0 && <span className="bk-count">{countIn(c.id)}</span>}
@@ -303,11 +322,11 @@ export function BookingFlow(p: BookingPageProps) {
                       <div className="grow">
                         <div className="strong">{s.name}</div>
                         <div className="small muted">
-                          {fmtDuration(s.duration_min)}{s.gender !== 'unisex' && <> · {s.gender === 'female' ? 'Women' : 'Men'}</>}
+                          {fmtDurationT(t, s.duration_min)}{s.gender !== 'unisex' && <> · {s.gender === 'female' ? t('bk.women') : t('bk.men')}</>}
                         </div>
                         {s.description && <div className="small ink2" style={{ marginTop: 2 }}>{s.description}</div>}
                         {linkStylist && staffChoice === linkStylist.id && !doesService(linkStylist.id, s.id) && (
-                          <div className="tiny muted" style={{ marginTop: 2 }}>Not with {linkStylist.name.split(' ')[0]}</div>
+                          <div className="tiny muted" style={{ marginTop: 2 }}>{t('bk.notWith', { name: linkStylist.name.split(' ')[0] })}</div>
                         )}
                       </div>
                       <span className="num strong">{money(s.price)}</span>
@@ -317,13 +336,13 @@ export function BookingFlow(p: BookingPageProps) {
                 );
               })}
             </ul>
-            {!p.services.length && <Notice>This salon hasn’t put any services online yet. Please call them to book.</Notice>}
+            {!p.services.length && <Notice>{t('bk.noServices')}</Notice>}
           </section>
         )}
 
         {step === 2 && (
           <section className="stack">
-            <ul className="bk-stylists" aria-label="Stylists">
+            <ul className="bk-stylists" aria-label={t('bk.stylists')}>
               <li>
                 <div className={cx('bk-stylist', staffId === null && 'is-on')}>
                   <button type="button" className="bk-stylist-pick" aria-pressed={staffId === null} onClick={() => setStaffChoice(null)}>
@@ -332,8 +351,8 @@ export function BookingFlow(p: BookingPageProps) {
                       <span className="bk-pick-check"><Icon name="check" size={13} strokeWidth={3} /></span>
                     </span>
                     <div className="grow" style={{ minWidth: 0 }}>
-                      <div className="bk-stylist-name">Anyone available</div>
-                      <div className="small muted">Earliest time with any stylist</div>
+                      <div className="bk-stylist-name">{t('bk.anyone')}</div>
+                      <div className="small muted">{t('bk.anyoneSub')}</div>
                       <NextFreeLine value={nextFor(null)} today={p.today} />
                     </div>
                   </button>
@@ -347,7 +366,7 @@ export function BookingFlow(p: BookingPageProps) {
             </ul>
             {eligible.length < p.staff.length && (
               <p className="small muted">
-                Showing stylists who do {chosen.length === 1 ? chosen[0].name.toLowerCase() : 'all your chosen services'}.
+                {chosen.length === 1 ? t('bk.showingFor', { service: chosen[0].name.toLowerCase() }) : t('bk.showingForAll')}
               </p>
             )}
           </section>
@@ -358,23 +377,23 @@ export function BookingFlow(p: BookingPageProps) {
             {timeNotice && <Notice tone="warn">{timeNotice}</Notice>}
             <DateStrip today={p.today} windowDays={p.salon.bookingWindowDays} hours={p.hours} value={date} onChange={(d) => { dateTouched.current = true; setDate(d); setTimeNotice(null); }} />
             <div className="between">
-              <h3>{fmtDateLong(date)}</h3>
+              <h3>{fmtDateLong(date, t.locale)}</h3>
               {stylist && <span className="bk-with-chip small"><Avatar name={stylist.name} color={stylist.color} photo={stylist.photoUrl} size="sm" />{stylist.name}</span>}
             </div>
             {slots === null ? (
-              <div className="bk-slots-loading" aria-live="polite"><span className="spinner" aria-hidden /> Finding free times…</div>
+              <div className="bk-slots-loading" aria-live="polite"><span className="spinner" aria-hidden /> {t('bk.findingTimes')}</div>
             ) : slotsError ? (
-              <Notice tone="error">{slotsError}</Notice>
+              <Notice tone="error">{t.err(slotsError)}</Notice>
             ) : slots.length === 0 ? (
               <div className="bk-empty">
-                <p className="strong">No free times on this day</p>
-                <p className="small muted">{stylist ? `${stylist.name} is fully booked. Try another day or any stylist.` : 'Try another day.'}</p>
+                <p className="strong">{t('bk.noTimes')}</p>
+                <p className="small muted">{stylist ? t('bk.fullyBooked', { name: stylist.name }) : t('bk.tryAnotherDay')}</p>
                 <div className="row-wrap" style={{ justifyContent: 'center' }}>
                   {(() => {
                     const next = days.find((d) => d.date > date && d.open);
-                    return next ? <Button size="sm" onClick={() => { dateTouched.current = true; setDate(next.date); }}>Try {fmtDateShort(next.date)}</Button> : null;
+                    return next ? <Button size="sm" onClick={() => { dateTouched.current = true; setDate(next.date); }}>{t('bk.tryDate', { date: fmtDateShort(next.date, t.locale) })}</Button> : null;
                   })()}
-                  {stylist && <Button size="sm" variant="ghost" onClick={() => setStaffChoice(null)}>Anyone available</Button>}
+                  {stylist && <Button size="sm" variant="ghost" onClick={() => setStaffChoice(null)}>{t('bk.anyone')}</Button>}
                 </div>
               </div>
             ) : (
@@ -385,32 +404,32 @@ export function BookingFlow(p: BookingPageProps) {
 
         {step === 4 && slot && (
           <section className="stack-lg">
-            <Summary services={chosen} total={total} when={whenLabel!} stylist={stylist?.name ?? 'the first free stylist'} minutes={minutes} />
+            <Summary services={chosen} total={total} when={whenLabel!} stylist={stylist?.name ?? t('bk.firstFree')} minutes={minutes} />
             <div className="stack">
-              <TextField label="Your name" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" error={nameError} placeholder="As the salon should call you" />
+              <TextField label={t('bk.yourName')} value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" error={nameError} placeholder={t('bk.namePlaceholder')} />
               {p.me || verified ? (
-                <div className="bk-verified"><Icon name="check" size={16} />Booking with {formatPhone(p.me?.phone ?? otp.digits)}</div>
+                <div className="bk-verified"><Icon name="check" size={16} />{t('bk.bookingWithPhone', { phone: formatPhone(p.me?.phone ?? otp.digits) })}</div>
               ) : otp.stage === 'phone' ? (
-                <PhoneInput id="bk-phone" label="Mobile number" value={otp.phoneInput} onChange={otp.setPhoneInput} error={otp.error}
-                  hint="We’ll send a 6-digit code on WhatsApp to confirm it’s you." onKeyDown={(e) => { if (e.key === 'Enter') confirm(); }} />
+                <PhoneInput id="bk-phone" label={t('common.mobileNumber')} value={otp.phoneInput} onChange={otp.setPhoneInput} error={otp.error}
+                  hint={t('otp.hint')} onKeyDown={(e) => { if (e.key === 'Enter') confirm(); }} />
               ) : (
                 <div className="field">
-                  <label htmlFor="bk-code">Code sent to {formatPhone(otp.digits)}</label>
+                  <label htmlFor="bk-code">{t('otp.codeSentTo', { phone: formatPhone(otp.digits) })}</label>
                   <input id="bk-code" className="input bk-code num" inputMode="numeric" autoComplete="one-time-code" placeholder="••••••" maxLength={6}
                     value={otp.code} onChange={(e) => otp.setCode(e.target.value)} autoFocus aria-invalid={!!otp.error || undefined}
                     onKeyDown={(e) => { if (e.key === 'Enter') confirm(); }} />
-                  {otp.error ? <span className="error-text" role="alert">{otp.error}</span> : <span className="hint">Check WhatsApp for a message from Styile.</span>}
+                  {otp.error ? <span className="error-text" role="alert">{otp.error}</span> : <span className="hint">{t('otp.checkWa')}</span>}
                   <div className="row-wrap" style={{ gap: 4 }}>
-                    <Button size="sm" variant="ghost" onClick={otp.changeNumber}>Change number</Button>
+                    <Button size="sm" variant="ghost" onClick={otp.changeNumber}>{t('otp.changeNumber')}</Button>
                     <Button size="sm" variant="ghost" disabled={otp.resendIn > 0} onClick={() => otp.send()}>
-                      {otp.resendIn > 0 ? `Resend in ${otp.resendIn}s` : 'Resend code'}
+                      {otp.resendIn > 0 ? t('otp.resendIn', { s: otp.resendIn }) : t('otp.resend')}
                     </Button>
                   </div>
                 </div>
               )}
-              <TextField label="Anything the salon should know? (optional)" value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={500} placeholder="E.g. first time colouring" />
+              <TextField label={t('bk.notesLabel')} value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={500} placeholder={t('bk.notesPlaceholder')} />
               {bookError && <Notice tone="error">{bookError}</Notice>}
-              <p className="tiny muted">You pay at the salon after your visit. You can change or cancel this booking from WhatsApp or your bookings page.</p>
+              <p className="tiny muted">{t('bk.payAtSalonNote')}</p>
             </div>
           </section>
         )}
@@ -418,19 +437,19 @@ export function BookingFlow(p: BookingPageProps) {
         {step === 5 && result && (
           <section className="bk-done">
             <div className="bk-done-icon"><Icon name="check" size={28} strokeWidth={2.4} /></div>
-            <h2>You’re booked</h2>
-            <p className="muted">We’ve sent the details to you on WhatsApp.</p>
-            <Summary services={chosen} total={total} when={result.when} stylist={result.stylist} minutes={minutes} payAtSalon />
+            <h2>{t('bk.booked')}</h2>
+            <p className="muted">{t('bk.sentOnWa')}</p>
+            <Summary services={chosen} total={total} when={fmtDateTime(result.start, p.salon.timezone, t.locale)} stylist={result.stylist} minutes={minutes} payAtSalon />
             <div className="stack-sm" style={{ width: '100%' }}>
               <Button block size="lg" icon="calendar" onClick={() => downloadIcs({
                 id: result.appointmentId, start: result.start, end: result.end,
-                title: `${chosen.map((s) => s.name).join(', ')} at ${p.salon.name}`,
+                title: t('bk.icsTitle', { services: chosen.map((s) => s.name).join(', '), salon: p.salon.name }),
                 location: [p.salon.name, addr].filter(Boolean).join(', '),
-                description: `With ${result.stylist}. Pay at the salon. To change or cancel, reply on WhatsApp or visit your bookings.`,
-              })}>Add to calendar</Button>
-              <Link href={`${p.base}/me`} className="btn btn-ghost btn-block">See all my bookings</Link>
+                description: t('bk.icsDesc', { name: result.stylist }),
+              })}>{t('bk.addToCalendar')}</Button>
+              <Link href={`${p.base}/me`} className="btn btn-ghost btn-block">{t('bk.seeAll')}</Link>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => { setPicked([]); setSlot(null); setResult(null); setStaffChoice(p.usualStylistId ?? null); go(1); }}>Book something else</Button>
+            <Button variant="ghost" size="sm" onClick={() => { setPicked([]); setSlot(null); setResult(null); setStaffChoice(p.usualStylistId ?? null); go(1); }}>{t('bk.bookElse')}</Button>
           </section>
         )}
       </main>
@@ -444,25 +463,26 @@ export function BookingFlow(p: BookingPageProps) {
         </div>
       )}
       <footer className="bk-wrap bk-foot tiny muted">
-        Online booking by <a href={mainUrl('/') || '/'}>Styile</a> · <Link href={`${p.base}/me`}>My bookings</Link>
+        {t('bk.poweredBy')} <a href={mainUrl('/') || '/'}>Styile</a> · <Link href={`${p.base}/me`}>{t('bk.myBookings')}</Link>
       </footer>
     </div>
   );
 }
 
 function Summary({ services, total, when, stylist, minutes, payAtSalon }: { services: PublicService[]; total: number; when: string; stylist: string; minutes: number; payAtSalon?: boolean }) {
+  const t = useT();
   return (
     <div className="bk-summary">
       <div className="bk-summary-when">
         <Icon name="calendar" size={18} />
-        <div><div className="strong">{when}</div><div className="small muted">with {stylist} · {fmtDuration(minutes)}</div></div>
+        <div><div className="strong">{when}</div><div className="small muted">{t('bk.withStylist', { name: stylist })} · {fmtDurationT(t, minutes)}</div></div>
       </div>
       <ul>
         {services.map((s) => <li key={s.id} className="between"><span>{s.name}</span><span className="num">{money(s.price)}</span></li>)}
       </ul>
       <div className="between bk-summary-total">
-        <span className="strong">Total</span>
-        <span className="strong num">{money(total)}{payAtSalon && <span className="small muted" style={{ fontWeight: 500 }}> · pay at salon</span>}</span>
+        <span className="strong">{t('common.total')}</span>
+        <span className="strong num">{money(total)}{payAtSalon && <span className="small muted" style={{ fontWeight: 500 }}> · {t('bk.payAtSalon')}</span>}</span>
       </div>
     </div>
   );
@@ -470,17 +490,19 @@ function Summary({ services, total, when, stylist, minutes, payAtSalon }: { serv
 
 /** "Next free: Today 4:30 PM" under a stylist; a shimmer while it loads, nothing if it couldn't be checked. */
 function NextFreeLine({ value, today }: { value: NextFree | null | undefined; today: string }) {
+  const t = useT();
   if (value === undefined) return <span className="bk-next is-loading" aria-hidden />;
-  if (value === null) return <div className="bk-next is-none">No free time in the next 7 days</div>;
-  return <div className="bk-next"><Icon name="clock" size={14} />Next free: {fmtNextFree(value, today)}</div>;
+  if (value === null) return <div className="bk-next is-none">{t('bk.noneIn7')}</div>;
+  return <div className="bk-next"><Icon name="clock" size={14} />{t('bk.nextFree', { when: nextFreeText(t, value, today) })}</div>;
 }
 
 function StylistCard({ s, on, usual, next, today, onPick }: {
   s: PublicStylist; on: boolean; usual: boolean; next: NextFree | null | undefined; today: string; onPick: () => void;
 }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const first = s.name.split(' ')[0];
-  const meta = [s.title, experienceLabel(s.yearsExperience)].filter(Boolean).join(' · ');
+  const meta = [s.title, experienceText(t, s.yearsExperience)].filter(Boolean).join(' · ');
   const longBio = !!s.bio && s.bio.length > 90;
   return (
     <div className={cx('bk-stylist', on && 'is-on')}>
@@ -490,7 +512,7 @@ function StylistCard({ s, on, usual, next, today, onPick }: {
           <span className="bk-pick-check" aria-hidden><Icon name="check" size={13} strokeWidth={3} /></span>
         </span>
         <div className="grow" style={{ minWidth: 0 }}>
-          {usual && <span className="bk-usual"><Icon name="star" size={12} strokeWidth={2.2} />Your usual stylist</span>}
+          {usual && <span className="bk-usual"><Icon name="star" size={12} strokeWidth={2.2} />{t('bk.usual')}</span>}
           <div className="bk-stylist-name">{s.name}</div>
           {meta && <div className="small muted">{meta}</div>}
           <NextFreeLine value={next} today={today} />
@@ -499,12 +521,12 @@ function StylistCard({ s, on, usual, next, today, onPick }: {
       {(s.specialties.length > 0 || s.bio) && (
         <div className="bk-stylist-more">
           {s.specialties.length > 0 && (
-            <ul className="bk-tags" aria-label={`${first}’s specialties`}>{s.specialties.map((t) => <li key={t}>{t}</li>)}</ul>
+            <ul className="bk-tags" aria-label={t('bk.specialtiesOf', { name: first })}>{s.specialties.map((t) => <li key={t}>{t}</li>)}</ul>
           )}
           {s.bio && <p className={cx('bk-bio', (open || !longBio) && 'is-open')}>{s.bio}</p>}
           {longBio && (
             <button type="button" className="link-btn small bk-bio-toggle" aria-expanded={open} onClick={() => setOpen((x) => !x)}>
-              {open ? 'Show less' : `More about ${first}`}
+              {open ? t('bk.showLess') : t('bk.moreAbout', { name: first })}
             </button>
           )}
         </div>

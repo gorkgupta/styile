@@ -1,6 +1,6 @@
 // Date-range presets for lists and reports, and "3 days ago" style labels.
 // Pure functions (no server imports) so both pages and client screens can use them.
-import { addDays, dayKeyOf, DAY_KEYS, fmtDateShort, isValidDateStr, localDate } from './time';
+import { addDays, dayKeyOf, DAY_KEYS, fmtDateShort, fmtDayMonthYear, fmtMonthYearParts, isValidDateStr, localDate, zonedParts } from './time';
 
 export type RangeKey = 'today' | 'yesterday' | 'week' | 'month' | 'custom';
 export const RANGE_LABEL: Record<RangeKey, string> = {
@@ -43,9 +43,9 @@ export function resolveRange(key: string | undefined, today: string, from?: stri
   }
 }
 
-export function describeRange(r: DateRange): string {
-  if (r.from === r.to) return fmtDateShort(r.from);
-  return `${fmtDateShort(r.from)} – ${fmtDateShort(r.to)}`;
+export function describeRange(r: DateRange, lang?: string | null): string {
+  if (r.from === r.to) return fmtDateShort(r.from, lang);
+  return `${fmtDateShort(r.from, lang)} – ${fmtDateShort(r.to, lang)}`;
 }
 
 /** "Today", "Yesterday", "5 days ago", "3 weeks ago", "2 months ago", "1 year ago". */
@@ -62,11 +62,13 @@ export function relativeAgo(iso: string | null | undefined, today: string, tz: s
 }
 
 /** "27 Oct 2026" in the salon's time zone. */
-export function fmtDateYear(iso: string, tz: string): string {
-  return new Intl.DateTimeFormat('en-IN', { timeZone: tz, day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(iso));
+export function fmtDateYear(iso: string, tz: string, lang?: string | null): string {
+  const z = zonedParts(new Date(iso), tz);
+  return fmtDayMonthYear(z.year, z.month, z.day, lang);
 }
 
 /** "Mar 2026" in the salon's time zone. */
-export function fmtMonthYear(iso: string, tz: string): string {
-  return new Intl.DateTimeFormat('en-IN', { timeZone: tz, month: 'short', year: 'numeric' }).format(new Date(iso));
+export function fmtMonthYear(iso: string, tz: string, lang?: string | null): string {
+  const z = zonedParts(new Date(iso), tz);
+  return fmtMonthYearParts(z.year, z.month, lang);
 }

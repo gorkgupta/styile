@@ -3,12 +3,14 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { ACTIVE_SALON_COOKIE } from '@/lib/context';
-import { isReservedSlug, rootDomain, salonUrl, SLUG_RE } from '@/lib/tenant';
+import { cookieDomain, isReservedSlug, rootDomain, salonUrl, SLUG_RE } from '@/lib/tenant';
 import { errorMessage } from '@/lib/actions';
 import { invalidPhoneMessage, normalizePhone } from '@/lib/phone';
 import { safeNextPath } from '@/lib/safe-next';
 import { cleanGstin, GSTIN_RE, stateByCode, stateByName } from '@/lib/gst';
 import type { ActionResult } from '@/lib/types';
+import { isLocale, LANG_COOKIE } from '@/lib/i18n/locales';
+import { revalidatePath } from 'next/cache';
 
 function safeNext(next: FormDataEntryValue | null, fallback: string) {
   return safeNextPath(next) ?? fallback;
@@ -38,6 +40,22 @@ export async function signUp(_: ActionResult | null, form: FormData): Promise<Ac
   if (error) return { ok: false, error: errorMessage(error) };
   if (!data.session) return { ok: true, message: 'Check your email and open the link to confirm your account.' };
   redirect('/onboarding');
+}
+
+/** The signed-in user's own app language (profiles.locale); also remembered on this browser for the salon site. */
+export async function setMyLanguage(locale: string): Promise<ActionResult> {
+  try {
+    if (!isLocale(locale)) return { ok: false, error: 'Pick English, हिन्दी, नेपाली or বাংলা.' };
+    const supabase = await createClient();
+    const { data } = await supabase.auth.getUser();
+    if (!data.user) return { ok: false, error: 'Your session has ended. Log in again.' };
+    // RLS (profiles_self_update) lets a user change only their own profile.
+    const { error } = await supabase.from('profiles').update({ locale: locale === 'en' ? null : locale }).eq('id', data.user.id);
+    if (error) return { ok: false, error: errorMessage(error) };
+    (await cookies()).set(LANG_COOKIE, locale, { path: '/', sameSite: 'lax', maxAge: 60 * 60 * 24 * 365, domain: cookieDomain() });
+    revalidatePath('/app', 'layout');
+    return { ok: true };
+  } catch (e) { return { ok: false, error: errorMessage(e) }; }
 }
 
 export async function signOut() {

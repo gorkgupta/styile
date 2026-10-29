@@ -13,6 +13,8 @@ import type { ApptStatus, InvoiceStatus } from '@/lib/types';
 import { activeMembership, CLIENT_PACKAGE_SELECT, membershipState, normalizeClientPackage, normalizeMembership, packageState } from '@/lib/packages';
 import { localDate } from '@/lib/time';
 import { normalizeAdvance, normalizeEvent } from '@/lib/events';
+import { I18nRoot } from '@/lib/i18n/root';
+import { siteLocale } from '@/lib/i18n/server';
 
 export const metadata: Metadata = { title: 'Your bookings' };
 export const dynamic = 'force-dynamic';
@@ -25,7 +27,7 @@ interface ApptRow {
 
 // A client's bookings, bills and coins at ONE salon: the salon whose site this is.
 // Clients use the same login (their phone) on every salon's site, but each site only shows that salon.
-export default async function Page({ params }: { params: Promise<{ slug: string }> }) {
+export default async function Page({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<{ lang?: string | string[] }> }) {
   const { slug } = await params;
   const site = await findSiteSalon(slug);
   if (!site) notFound();
@@ -106,7 +108,9 @@ export default async function Page({ params }: { params: Promise<{ slug: string 
   const meta = (user.user_metadata ?? {}) as { full_name?: string };
   const name = customers.find((c) => c.name && c.name !== phone)?.name ?? meta.full_name ?? '';
 
+  const locale = await siteLocale(site.defaultLocale, (await searchParams).lang);
   return (
+    <I18nRoot locale={locale}>
     <PortalHome
       me={{ name, phone }} nowIso={nowIso} base={base} known={customers.length > 0}
       salon={{
@@ -118,5 +122,6 @@ export default async function Page({ params }: { params: Promise<{ slug: string 
       packages={packages} membership={membership} today={today}
       events={((evs.data ?? []) as { advances: unknown[] | null }[]).map((e) => ({ event: normalizeEvent(e), advances: (e.advances ?? []).map(normalizeAdvance) }))}
     />
+    </I18nRoot>
   );
 }

@@ -14,6 +14,8 @@ import { fmtDateYear } from '@/lib/periods';
 import { fmtTime } from '@/lib/time';
 import type { CoinPack, PayMethod } from '@/lib/types';
 import { METHOD_LABEL } from '@/lib/types';
+import { useT } from '@/lib/i18n/react';
+import { coinsT } from '@/lib/i18n/format';
 
 export interface CoinsPanelProps {
   customer: { id: string; name: string; balance: number };
@@ -40,6 +42,7 @@ export function CoinsPanel({ customer, salon, history, moreHistory, tz, canSell,
   const [all, setAll] = useState(false);
   const [loadingAll, startAll] = useTransition();
   const toast = useToast();
+  const t = useT();
   useEffect(() => { setRows(history); }, [history]);
 
   const balance = customer.balance;
@@ -50,7 +53,7 @@ export function CoinsPanel({ customer, salon, history, moreHistory, tz, canSell,
   const showAll = () => startAll(async () => {
     if (moreHistory && !all) {
       const r = await getCoinHistory(customer.id);
-      if (!r.ok) return toast(r.error, 'error');
+      if (!r.ok) return toast(t.err(r.error), 'error');
       setRows(r.data!.rows);
     }
     setAll(true);
@@ -58,28 +61,29 @@ export function CoinsPanel({ customer, salon, history, moreHistory, tz, canSell,
 
   return (
     <>
-      <Panel flush title={<h2 className="row" style={{ gap: 8 }}><Icon name="coins" size={18} className="coin-title-icon" />Coins</h2>}
-        actions={canAdjust && (rows.length > 0 || balance > 0) ? <Button size="sm" variant="ghost" icon="edit" onClick={() => setAdjusting(true)}>Adjust</Button> : undefined}>
+      <Panel flush title={<h2 className="row" style={{ gap: 8 }}><Icon name="coins" size={18} className="coin-title-icon" />{t('method.wallet')}</h2>}
+        actions={canAdjust && (rows.length > 0 || balance > 0) ? <Button size="sm" variant="ghost" icon="edit" onClick={() => setAdjusting(true)}>{t('coins.adjust')}</Button> : undefined}>
         <div className="coin-hero">
           <div className="grow" style={{ minWidth: 0 }}>
-            <div className="coin-hero-value num">{fmtCoins(balance)}<span> coin{balance === 1 ? '' : 's'}</span></div>
-            <div className="small muted">{balance > 0 ? `${first} can use ${money(balance)} on bills here` : salon.enabled ? 'No coins yet' : 'Coin sales are turned off in Settings'}</div>
+            <div className="coin-hero-value num">{fmtCoins(balance)}<span> {t('coins.unit', { count: balance })}</span></div>
+            <div className="small muted">{balance > 0 ? t('coins.canUse', { name: first, money: money(balance) }) : salon.enabled ? t('coins.none') : t('coins.off')}</div>
           </div>
-          {canSell && salon.enabled && <Button variant="primary" icon="plus" onClick={() => setSelling(true)}>Sell coins</Button>}
+          {canSell && salon.enabled && <Button variant="primary" icon="plus" onClick={() => setSelling(true)}>{t('coins.sell')}</Button>}
         </div>
         {rows.length ? (
           <>
             <CoinHistoryList rows={shown} tz={tz} billHref={(id) => `/app/invoices/${id}`} />
             {(hidden > 0 || (moreHistory && !all)) && (
               <div className="panel-foot coin-more">
-                <Button size="sm" variant="ghost" loading={loadingAll} onClick={showAll}>Show all coin history</Button>
+                <Button size="sm" variant="ghost" loading={loadingAll} onClick={showAll}>{t('coins.showAll')}</Button>
               </div>
             )}
           </>
         ) : salon.enabled && canSell ? (
           <p className="panel-body small muted">
-            Sell a coin pack and {first} pays for future visits from the balance
-            {salon.packs.length ? ` — e.g. pay ${money(salon.packs[Math.min(1, salon.packs.length - 1)].pay)}, get ${coinsText(salon.packs[Math.min(1, salon.packs.length - 1)].coins)}.` : '.'}
+            {salon.packs.length
+              ? t('coins.sellHintEg', { name: first, pay: money(salon.packs[Math.min(1, salon.packs.length - 1)].pay), coins: coinsT(t, salon.packs[Math.min(1, salon.packs.length - 1)].coins) })
+              : t('coins.sellHint', { name: first })}
           </p>
         ) : null}
       </Panel>
@@ -102,6 +106,7 @@ export function SellCoinsSheet({ open, onClose, customer, salon, canBonus, tz }:
   open: boolean; onClose: () => void; customer: CoinsPanelProps['customer']; salon: CoinsPanelProps['salon']; canBonus: boolean; tz: string;
 }) {
   const router = useRouter();
+  const t = useT();
   const [pending, start] = useTransition();
   const packs = useMemo(() => [...salon.packs].sort((a, b) => a.pay - b.pay), [salon.packs]);
   const [pick, setPick] = useState<number | 'custom'>(0);
@@ -141,26 +146,26 @@ export function SellCoinsSheet({ open, onClose, customer, salon, canBonus, tz }:
 
   if (receipt) {
     return (
-      <Sheet open={open} onClose={onClose} title="Coins receipt" width={480}
-        footer={<><Button icon="printer" onClick={() => window.print()}>Print</Button><Button variant="primary" onClick={onClose}>Done</Button></>}>
+      <Sheet open={open} onClose={onClose} title={t('rcpt.coinsTitle')} width={480}
+        footer={<><Button icon="printer" onClick={() => window.print()}>{t('common.print')}</Button><Button variant="primary" onClick={onClose}>{t('common.done')}</Button></>}>
         <div className="stack-lg coin-receipt">
           <div className="coin-receipt-head">
             <span className="coin-receipt-icon"><Icon name="check" size={22} /></span>
             <div>
-              <div className="strong">{coinsText(receipt.coins)} added for {customer.name}</div>
-              <div className="small muted">{receipt.sent ? `Receipt sent to ${first} on WhatsApp` : 'Saved in their coin history'}</div>
+              <div className="strong">{t('rcpt.coinsAddedFor', { coins: coinsT(t, receipt.coins), name: customer.name })}</div>
+              <div className="small muted">{receipt.sent ? t('rcpt.sentOnWa', { name: first }) : t('rcpt.savedInHistory')}</div>
             </div>
           </div>
           <dl className="coin-receipt-lines">
-            <div><dt>Salon</dt><dd>{salon.name}</dd></div>
-            <div><dt>Client</dt><dd>{customer.name}</dd></div>
-            <div><dt>Date</dt><dd className="num">{fmtDateYear(receipt.at, tz)}, {fmtTime(receipt.at, tz)}</dd></div>
-            <div><dt>Amount received</dt><dd className="num strong">{money(receipt.pay)}</dd></div>
-            <div><dt>Paid by</dt><dd>{METHOD_LABEL[receipt.method]}{receipt.reference ? <span className="muted"> · {receipt.reference}</span> : null}</dd></div>
-            <div><dt>Coins added</dt><dd className="num strong">{fmtCoins(receipt.coins)}{receipt.bonus > 0 ? <span className="muted"> (incl. {fmtCoins(receipt.bonus)} bonus)</span> : null}</dd></div>
-            <div className="coin-receipt-total"><dt>New balance</dt><dd className="num">{coinsText(receipt.balance)}</dd></div>
+            <div><dt>{t('rcpt.salon')}</dt><dd>{salon.name}</dd></div>
+            <div><dt>{t('rcpt.client')}</dt><dd>{customer.name}</dd></div>
+            <div><dt>{t('common.date')}</dt><dd className="num">{fmtDateYear(receipt.at, tz, t.locale)}, {fmtTime(receipt.at, tz)}</dd></div>
+            <div><dt>{t('rcpt.amountReceived')}</dt><dd className="num strong">{money(receipt.pay)}</dd></div>
+            <div><dt>{t('bill.paidBy')}</dt><dd>{t(`method.${receipt.method}`)}{receipt.reference ? <span className="muted"> · {receipt.reference}</span> : null}</dd></div>
+            <div><dt>{t('rcpt.coinsAdded')}</dt><dd className="num strong">{fmtCoins(receipt.coins)}{receipt.bonus > 0 ? <span className="muted"> {t('rcpt.inclBonus', { n: fmtCoins(receipt.bonus) })}</span> : null}</dd></div>
+            <div className="coin-receipt-total"><dt>{t('rcpt.newBalance')}</dt><dd className="num">{coinsT(t, receipt.balance)}</dd></div>
           </dl>
-          <p className="tiny muted">Not a tax invoice. Prepaid coins for use at {salon.name} only (1 coin = ₹1). GST is charged on the bill when the coins are used.</p>
+          <p className="tiny muted">{t('rcpt.coinsNote', { salon: salon.name })}</p>
         </div>
       </Sheet>
     );

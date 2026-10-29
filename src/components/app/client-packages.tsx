@@ -11,11 +11,13 @@ import { cancelPackage, sellMembership, sellPackage } from '@/actions/packages';
 import { money } from '@/lib/billing';
 import { coinsText } from '@/lib/coins';
 import {
-  cardDates, dayText, daysLeft, membershipState, packageExpiry, packageLeft, packageSavingPct, packageState, packageTotalSessions, PACKAGE_STATE_LABEL,
+  cardDates, dayText, daysLeft, membershipState, packageExpiry, packageLeft, packageSavingPct, packageState, packageTotalSessions,
   perksText, sessionsLeft, sessionsText, sessionValues, validityText,
 } from '@/lib/packages';
 import { fmtDateYear } from '@/lib/periods';
 import { fmtTime } from '@/lib/time';
+import { rich, useT } from '@/lib/i18n/react';
+import { dayTextT, sessionsT } from '@/lib/i18n/format';
 import { MONEY_METHODS, METHOD_LABEL, type ClientMembership, type ClientPackage, type GstMode, type MembershipPlan, type PayMethod } from '@/lib/types';
 
 /** A package on the salon's menu with its services' names and menu prices. */
@@ -46,6 +48,7 @@ const moneyMethods = (enabled?: PayMethod[]) => deskMethods(enabled).filter((m) 
 // Packages panel
 // ---------------------------------------------------------------------------
 export function PackagesPanel(p: ClientBenefitsProps) {
+  const t = useT();
   const [selling, setSelling] = useState(false);
   const [cancelling, setCancelling] = useState<ClientPackage | null>(null);
   const [showOld, setShowOld] = useState(false);
@@ -57,8 +60,8 @@ export function PackagesPanel(p: ClientBenefitsProps) {
   return (
     <>
       <Panel flush className="cpk-panel"
-        title={<h2 className="row" style={{ gap: 8 }}><Icon name="box" size={18} className="pkg-title-icon" />Packages</h2>}
-        actions={p.canSell && p.menu.length > 0 ? <Button size="sm" variant={current.length ? 'ghost' : 'primary'} icon="plus" onClick={() => setSelling(true)}>Sell package</Button> : undefined}>
+        title={<h2 className="row" style={{ gap: 8 }}><Icon name="box" size={18} className="pkg-title-icon" />{t('nav.packages')}</h2>}
+        actions={p.canSell && p.menu.length > 0 ? <Button size="sm" variant={current.length ? 'ghost' : 'primary'} icon="plus" onClick={() => setSelling(true)}>{t('pkg.sell')}</Button> : undefined}>
         {current.length > 0 ? (
           <ul className="list">
             {current.map((x) => <li key={x.id}><PackageCard pkg={x} today={p.today} tz={p.tz} onCancel={p.canCancel ? () => setCancelling(x) : undefined} /></li>)}
@@ -66,15 +69,15 @@ export function PackagesPanel(p: ClientBenefitsProps) {
         ) : (
           <div className="panel-body small muted">
             {example && p.canSell
-              ? <>No package yet. Sell {first} a package to prepay visits — e.g. <span className="strong ink2">{example.name}</span> for <span className="num">{money(example.price)}</span>.</>
-              : p.canManage ? <>Put packages like “6 Facials” on your menu under <Link href="/app/packages">Packages & memberships</Link>.</>
-              : 'No packages.'}
+              ? rich(t('pkg.noneSell', { name: first }), { pkg: <span className="strong ink2">{example.name}</span>, money: <span className="num">{money(example.price)}</span> })
+              : p.canManage ? rich(t('pkg.noneManage'), { link: <Link href="/app/packages">{t('pkg.menuLink')}</Link> })
+              : t('pkg.none')}
           </div>
         )}
         {old.length > 0 && (
           <div className="panel-foot cpk-old">
             <button type="button" className="link-btn small" aria-expanded={showOld} onClick={() => setShowOld((v) => !v)}>
-              {showOld ? 'Hide' : 'Show'} used, expired and cancelled ({old.length})
+              {showOld ? t('pkg.hideOld', { n: old.length }) : t('pkg.showOld', { n: old.length })}
             </button>
           </div>
         )}
@@ -91,6 +94,7 @@ export function PackagesPanel(p: ClientBenefitsProps) {
 }
 
 export function PackageCard({ pkg, today, tz, onCancel, compact }: { pkg: ClientPackage; today: string; tz: string; onCancel?: () => void; compact?: boolean }) {
+  const t = useT();
   const state = packageState(pkg, today);
   const left = packageLeft(pkg);
   const dl = daysLeft(pkg.expires_on, today);
@@ -100,13 +104,13 @@ export function PackageCard({ pkg, today, tz, onCancel, compact }: { pkg: Client
         <div style={{ minWidth: 0 }}>
           <div className="strong truncate">{pkg.name}</div>
           <div className="tiny muted num">
-            {state === 'active' ? <>{sessionsText(left)} left · use by {dayText(pkg.expires_on, today)}{dl <= 14 ? <span className="warn-text strong"> · {dl === 0 ? 'last day today' : `${dl} day${dl === 1 ? '' : 's'} left`}</span> : ''}</>
-              : state === 'expired' ? <>Ended {dayText(pkg.expires_on, today)} · {sessionsText(left)} unused</>
-              : state === 'cancelled' ? <>Cancelled{pkg.cancel_reason ? ` · ${pkg.cancel_reason}` : ''}</>
-              : <>All {packageTotalSessions(pkg)} sessions used</>}
+            {state === 'active' ? <>{t('pkg.leftUseBy', { left: sessionsT(t, left), day: dayTextT(t, pkg.expires_on, today) })}{dl <= 14 ? <span className="warn-text strong"> · {dl === 0 ? t('pkg.lastDay') : t('pkg.daysLeft', { count: dl })}</span> : ''}</>
+              : state === 'expired' ? <>{t('pkg.ended', { day: dayTextT(t, pkg.expires_on, today), left: sessionsT(t, left) })}</>
+              : state === 'cancelled' ? <>{t('pkg.state.cancelled')}{pkg.cancel_reason ? ` · ${pkg.cancel_reason}` : ''}</>
+              : <>{t('pkg.allUsed', { count: packageTotalSessions(pkg) })}</>}
           </div>
         </div>
-        <Badge tone={STATE_TONE[state]}>{PACKAGE_STATE_LABEL[state]}</Badge>
+        <Badge tone={STATE_TONE[state]}>{t(`pkg.state.${state}`)}</Badge>
       </div>
       <ul className="cpk-items">
         {pkg.items.map((i) => {
@@ -115,14 +119,14 @@ export function PackageCard({ pkg, today, tz, onCancel, compact }: { pkg: Client
             <li key={i.id}>
               <div className="between small">
                 <span className="truncate">{i.name}</span>
-                <span className="num nowrap"><span className="strong">{sessionsLeft(i)}</span> of {i.sessions_total} left</span>
+                <span className="num nowrap">{rich(t('pkg.ofLeft', { total: i.sessions_total }), { left: <span className="strong">{sessionsLeft(i)}</span> })}</span>
               </div>
               <div className="cpk-bar" role="progressbar" aria-valuemin={0} aria-valuemax={i.sessions_total} aria-valuenow={i.sessions_used}
-                aria-label={`${i.name}: ${i.sessions_used} of ${i.sessions_total} used`}>
+                aria-label={t('pkg.usedAria', { name: i.name, used: i.sessions_used, total: i.sessions_total })}>
                 {Array.from({ length: Math.min(i.sessions_total, 24) }, (_, k) => (
                   <span key={k} className={k < Math.round((i.sessions_used / i.sessions_total) * Math.min(i.sessions_total, 24)) ? 'is-used' : undefined} />
                 ))}
-                {i.sessions_total > 24 && <span className="sr-only">{pct}% used</span>}
+                {i.sessions_total > 24 && <span className="sr-only">{t('pkg.pctUsed', { pct })}</span>}
               </div>
             </li>
           );
@@ -130,9 +134,9 @@ export function PackageCard({ pkg, today, tz, onCancel, compact }: { pkg: Client
       </ul>
       {!compact && (
         <div className="between cpk-foot tiny muted">
-          <span className="num truncate">{pkg.receipt_no} · {money(pkg.amount_paid)} by {METHOD_LABEL[pkg.method]} · {fmtDateYear(pkg.purchased_at, tz)}
-            {pkg.refund_amount ? <> · <span className="danger-text">{money(pkg.refund_amount)} handed back</span></> : ''}</span>
-          {onCancel && state !== 'cancelled' && <button type="button" className="link-btn tiny danger-text nowrap" onClick={onCancel}>Cancel package</button>}
+          <span className="num truncate">{pkg.receipt_no} · {t('pkg.paidBy', { money: money(pkg.amount_paid), method: t(`method.${pkg.method}`) })} · {fmtDateYear(pkg.purchased_at, tz, t.locale)}
+            {pkg.refund_amount ? <> · <span className="danger-text">{t('pkg.handedBack', { money: money(pkg.refund_amount) })}</span></> : ''}</span>
+          {onCancel && state !== 'cancelled' && <button type="button" className="link-btn tiny danger-text nowrap" onClick={onCancel}>{t('pkg.cancel')}</button>}
         </div>
       )}
     </div>
@@ -245,27 +249,28 @@ function SellPackageSheet({ open, onClose, customer, salon, menu, today, tz }: C
 
 /** The printable package receipt (not a tax invoice). */
 export function PackageReceipt({ pkg, salonName, customerName, tz, sent }: { pkg: ClientPackage; salonName: string; customerName: string; tz: string; sent?: boolean }) {
+  const t = useT();
   return (
     <div className="stack-lg coin-receipt">
       <div className="coin-receipt-head">
         <span className="coin-receipt-icon"><Icon name="check" size={22} /></span>
         <div>
-          <div className="strong">{pkg.name} sold to {customerName}</div>
-          <div className="small muted">{sent ? `Receipt sent to ${customerName.split(' ')[0]} on WhatsApp` : 'Saved on their profile'}</div>
+          <div className="strong">{t('rcpt.pkgSoldTo', { name: pkg.name, client: customerName })}</div>
+          <div className="small muted">{sent ? t('rcpt.sentOnWa', { name: customerName.split(' ')[0] }) : t('rcpt.savedOnProfile')}</div>
         </div>
       </div>
       <dl className="coin-receipt-lines">
-        <div><dt>Package receipt</dt><dd className="num strong">{pkg.receipt_no}</dd></div>
-        <div><dt>Salon</dt><dd>{salonName}</dd></div>
-        <div><dt>Client</dt><dd>{customerName}</dd></div>
-        <div><dt>Date</dt><dd className="num">{fmtDateYear(pkg.purchased_at, tz)}, {fmtTime(pkg.purchased_at, tz)}</dd></div>
-        <div><dt>Package</dt><dd>{pkg.name}</dd></div>
-        {pkg.items.map((i) => <div key={i.id}><dt>{i.name}</dt><dd className="num">{sessionsText(i.sessions_total)}</dd></div>)}
-        <div><dt>Use by</dt><dd className="num">{dayText(pkg.expires_on)}</dd></div>
-        <div><dt>Paid by</dt><dd>{METHOD_LABEL[pkg.method]}{pkg.reference ? <span className="muted"> · {pkg.reference}</span> : null}</dd></div>
-        <div className="coin-receipt-total"><dt>Amount received</dt><dd className="num">{money(pkg.amount_paid)}</dd></div>
+        <div><dt>{t('rcpt.pkgTitle')}</dt><dd className="num strong">{pkg.receipt_no}</dd></div>
+        <div><dt>{t('rcpt.salon')}</dt><dd>{salonName}</dd></div>
+        <div><dt>{t('rcpt.client')}</dt><dd>{customerName}</dd></div>
+        <div><dt>{t('common.date')}</dt><dd className="num">{fmtDateYear(pkg.purchased_at, tz, t.locale)}, {fmtTime(pkg.purchased_at, tz)}</dd></div>
+        <div><dt>{t('rcpt.package')}</dt><dd>{pkg.name}</dd></div>
+        {pkg.items.map((i) => <div key={i.id}><dt>{i.name}</dt><dd className="num">{sessionsT(t, i.sessions_total)}</dd></div>)}
+        <div><dt>{t('rcpt.useBy')}</dt><dd className="num">{dayTextT(t, pkg.expires_on)}</dd></div>
+        <div><dt>{t('bill.paidBy')}</dt><dd>{t(`method.${pkg.method}`)}{pkg.reference ? <span className="muted"> · {pkg.reference}</span> : null}</dd></div>
+        <div className="coin-receipt-total"><dt>{t('rcpt.amountReceived')}</dt><dd className="num">{money(pkg.amount_paid)}</dd></div>
       </dl>
-      <p className="tiny muted">Not a tax invoice. Prepaid sessions for use at {salonName} only, by the date above. Each visit gets a bill for the service at its session value, paid from this package; GST, if any, is on that bill.</p>
+      <p className="tiny muted">{t('rcpt.pkgNote', { salon: salonName })}</p>
     </div>
   );
 }
