@@ -174,7 +174,7 @@ export async function sellMembership(input: SellMembershipInput): Promise<Action
 }
 
 /** What a client can use on a bill today: packages with sessions left, and their membership card. For the POS. */
-export async function getClientBenefits(customerId: string): Promise<ActionResult<{ packages: ClientPackage[]; membership: ClientMembership | null }>> {
+export async function getClientBenefits(customerId: string): Promise<ActionResult<{ packages: ClientPackage[]; membership: ClientMembership | null; advance: { left: number; receipts: string[] } }>> {
   try {
     const { supabase, salon, role } = await getSalonContext();
     if (!can(role, 'bill')) return { ok: false, error: 'Your role can’t bill.' };

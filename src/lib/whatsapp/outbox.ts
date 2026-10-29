@@ -19,6 +19,7 @@ export const TEMPLATES = {
   receipt: 'bill_receipt',                     // {{1}} name {{2}} salon {{3}} bill no {{4}} amount ; URL button param = invoice id
   coinsUpdate: 'coins_update',                 // {{1}} name {{2}} coins added {{3}} salon {{4}} balance
   packageReceipt: 'package_receipt',           // {{1}} name {{2}} amount {{3}} package {{4}} salon {{5}} receipt no {{6}} sessions {{7}} use by
+  advanceReceipt: 'advance_receipt',           // {{1}} name {{2}} amount {{3}} salon {{4}} event {{5}} receipt no {{6}} receipt link
 } as const;
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -186,6 +187,25 @@ export async function notifyPackageSold(salonId: string, clientPackageId: string
   return notifyCustomer(salonId, p.customer.phone, p.customer.id,
     `${money(p.amount_paid)} received for ${p.name} at ${p.salon.name} (receipt ${p.receipt_no}). Your sessions: ${sessions}. Use them by ${until} — just tell the desk on your visit. This is a package receipt, not a tax invoice; GST is on each visit's bill.`,
     { type: 'template', name: TEMPLATES.packageReceipt, bodyParams: [first, money(p.amount_paid), p.name, p.salon.name, p.receipt_no, sessions, until] });
+}
+
+/** Advance receipt for a bridal / event booking: amount, event, receipt number and a link to the receipt. */
+export async function notifyAdvanceReceipt(salonId: string, advanceId: string) {
+  const db = createAdminClient();
+  const { data } = await db.from('advance_payments')
+    .select('id, amount, receipt_no, customer:customers(id, name, phone), event:events(title, event_at), salon:salons(name, slug, timezone)')
+    .eq('id', advanceId).eq('salon_id', salonId).single();
+  const a = data as unknown as {
+    id: string; amount: number; receipt_no: string; customer: { id: string; name: string; phone: string };
+    event: { title: string; event_at: string } | null; salon: { name: string; slug: string; timezone: string };
+  } | null;
+  if (!a) return { sent: false, reason: 'Advance not found' };
+  const first = a.customer.name.split(' ')[0];
+  const link = salonUrl(a.salon.slug, `/me/receipts/${a.id}`);
+  const what = a.event ? `${a.event.title} on ${when(a.event.event_at, a.salon.timezone)}` : 'your booking';
+  return notifyCustomer(salonId, a.customer.phone, a.customer.id,
+    `${money(a.amount)} advance received for ${what} at ${a.salon.name} (receipt ${a.receipt_no}). It will be adjusted on your final bill. Receipt: ${link}`,
+    { type: 'template', name: TEMPLATES.advanceReceipt, bodyParams: [first, money(a.amount), a.salon.name, a.event?.title ?? 'your booking', a.receipt_no, link] });
 }
 
 /** A person at the salon replies from the inbox. Throws a readable error if the 24h window is closed. */

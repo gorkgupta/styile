@@ -12,6 +12,7 @@ import type { CoinRow } from '@/components/app/coin-history';
 import type { ApptStatus, InvoiceStatus } from '@/lib/types';
 import { activeMembership, CLIENT_PACKAGE_SELECT, membershipState, normalizeClientPackage, normalizeMembership, packageState } from '@/lib/packages';
 import { localDate } from '@/lib/time';
+import { normalizeAdvance, normalizeEvent } from '@/lib/events';
 
 export const metadata: Metadata = { title: 'Your bookings' };
 export const dynamic = 'force-dynamic';
@@ -46,7 +47,7 @@ export default async function Page({ params }: { params: Promise<{ slug: string 
   const customerIds = customers.map((c) => c.id);
 
   const nowIso = new Date().toISOString();
-  const [appts, invoices, coinTx, pkgs, cards] = customerIds.length ? await Promise.all([
+  const [appts, invoices, coinTx, pkgs, cards, evs] = customerIds.length ? await Promise.all([
     supabase.from('appointments')
       .select('id, salon_id, start_at, end_at, status, invoice_id, staff_id, services:appointment_services(name, price, sort, service_id)')
       .in('customer_id', customerIds).eq('salon_id', site.id).neq('status', 'waiting').order('start_at', { ascending: false }).limit(60),
@@ -58,7 +59,10 @@ export default async function Page({ params }: { params: Promise<{ slug: string 
     // Packages and membership cards bought here (RLS: the client's own only).
     supabase.from('client_packages').select(CLIENT_PACKAGE_SELECT).in('customer_id', customerIds).eq('salon_id', site.id).order('expires_on').limit(20),
     supabase.from('client_memberships').select('*').in('customer_id', customerIds).eq('salon_id', site.id).order('ends_on', { ascending: false }).limit(5),
-  ]) : [{ data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: [] }];
+    // Bridal / group events and the advances paid for them.
+    supabase.from('events').select('*, advances:advance_payments(*)').in('customer_id', customerIds).eq('salon_id', site.id)
+      .neq('status', 'cancelled').gte('event_at', new Date(Date.now() - 2 * 86400000).toISOString()).order('event_at').limit(5),
+  ]) : [{ data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: [] }];
 
   // Clients can't read staff rows (phones, commission); stylist names and photos for their own visits come from the
   // service role, and only public fields are passed on.
@@ -112,6 +116,7 @@ export default async function Page({ params }: { params: Promise<{ slug: string 
       upcoming={upcoming} past={past} bills={bills}
       coins={{ balance: coinBalance, history: coinHistory }}
       packages={packages} membership={membership} today={today}
+      events={((evs.data ?? []) as { advances: unknown[] | null }[]).map((e) => ({ event: normalizeEvent(e), advances: (e.advances ?? []).map(normalizeAdvance) }))}
     />
   );
 }

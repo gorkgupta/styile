@@ -2,6 +2,7 @@ import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { addDays, zonedToUtc } from './time';
 import type { AppointmentFull, ClientMembership, ClientPackage, Service, ServiceCategory, Staff } from './types';
+import { advanceLeft, normalizeAdvance } from './events';
 import { activeMembership, CLIENT_PACKAGE_SELECT, normalizeClientPackage, normalizeMembership, packageState } from './packages';
 import type { Expense, ExpenseRow } from './dayclose';
 
@@ -66,18 +67,22 @@ export async function memberNames(db: SupabaseClient, salonId: string, userIds: 
 }
 
 /** A client's packages with sessions left today and their membership card valid today (for the POS). */
-export async function getClientBenefits(db: SupabaseClient, salonId: string, customerId: string, today: string): Promise<{ packages: ClientPackage[]; membership: ClientMembership | null }> {
-  const [pk, mem] = await Promise.all([
+export async function getClientBenefits(db: SupabaseClient, salonId: string, customerId: string, today: string): Promise<{ packages: ClientPackage[]; membership: ClientMembership | null; advance: { left: number; receipts: string[] } }> {
+  const [pk, mem, adv] = await Promise.all([
     db.from('client_packages').select(CLIENT_PACKAGE_SELECT).eq('salon_id', salonId).eq('customer_id', customerId)
       .eq('status', 'active').gte('expires_on', today).order('expires_on'),
     db.from('client_memberships').select('*').eq('salon_id', salonId).eq('customer_id', customerId)
       .eq('status', 'active').lte('starts_on', today).gte('ends_on', today),
+    // Advances (front desk and above can read them; for others this is simply empty).
+    db.from('advance_payments').select('receipt_no, amount, applied_amount, refund_amount').eq('salon_id', salonId).eq('customer_id', customerId).order('received_at'),
   ]);
   if (pk.error) throw pk.error;
   if (mem.error) throw mem.error;
+  const open = (adv.data ?? []).map(normalizeAdvance).filter((a) => advanceLeft(a) > 0);
   return {
     packages: (pk.data ?? []).map(normalizeClientPackage).filter((p) => packageState(p, today) === 'active'),
     membership: activeMembership((mem.data ?? []).map(normalizeMembership), today),
+    advance: { left: Math.round(open.reduce((s, a) => s + advanceLeft(a), 0) * 100) / 100, receipts: open.map((a) => a.receipt_no) },
   };
 }
 

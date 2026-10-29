@@ -16,7 +16,7 @@ import { daySummary, dayStaff, recentDays, todaysExpenses } from '../dayclose-da
 import { packageState } from '../../src/lib/packages';
 
 /** Clicks the given selectors in order once rendered (to open a sheet or press a chip). */
-function Click({ steps, children }: { steps: string[]; children: ReactNode }) {
+export function Click({ steps, children }: { steps: string[]; children: ReactNode }) {
   useEffect(() => {
     let alive = true;
     (async () => {

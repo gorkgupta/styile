@@ -8,7 +8,8 @@ import { AppointmentSheet, NewAppointmentSheet, type MenuProps } from './appoint
 import { useLiveRefresh } from './live';
 import { staffWindows } from '@/lib/availability';
 import { addDays, fmtTime, localMinutes, minutesToHhmm, relativeDay, fmtDateLong, dayKeyOf } from '@/lib/time';
-import type { AppointmentFull, Hours } from '@/lib/types';
+import type { AppointmentFull, Hours, PayMethod } from '@/lib/types';
+import { NewEventSheet } from './events';
 
 const HOUR_PX = 72;
 
@@ -23,9 +24,12 @@ export interface CalendarProps {
   canBill: boolean;
   /** Stylists only see their own column by default. */
   myStaffId?: string | null;
+  /** Front desk and above can book bridal / group events from here. */
+  newEvent?: { methods?: PayMethod[]; waConnected: boolean } | null;
 }
 
-export function CalendarBoard({ salonId, date, today, nowIso, branchHours, appointments, menu, canBill, myStaffId }: CalendarProps) {
+export function CalendarBoard({ salonId, date, today, nowIso, branchHours, appointments, menu, canBill, myStaffId, newEvent }: CalendarProps) {
+  const [eventOpen, setEventOpen] = useState(false);
   const router = useRouter();
   useLiveRefresh(salonId, ['appointments']);
   const [selected, setSelected] = useState<AppointmentFull | null>(null);
@@ -86,7 +90,10 @@ export function CalendarBoard({ salonId, date, today, nowIso, branchHours, appoi
       <Topbar
         title={relativeDay(date, today) === 'Today' ? 'Today’s calendar' : relativeDay(date, today)}
         subtitle={fmtDateLong(date)}
-        actions={<Button variant="primary" icon="plus" onClick={() => setDraft({ time: '', staffId: '' })}><span className="hide-mobile">New appointment</span></Button>}
+        actions={<>
+          {newEvent && <Button icon="heart" onClick={() => setEventOpen(true)}><span className="hide-mobile">New event</span></Button>}
+          <Button variant="primary" icon="plus" onClick={() => setDraft({ time: '', staffId: '' })}><span className="hide-mobile">New appointment</span></Button>
+        </>}
       />
       <div className="page">
         <div className="between" style={{ flexWrap: 'wrap' }}>
@@ -140,8 +147,8 @@ export function CalendarBoard({ salonId, date, today, nowIso, branchHours, appoi
                       return (
                         <button key={a.id} type="button" className={`appt ${status}`} onClick={() => setSelected(a)}
                           style={{ top, height: h, ['--appt-color' as string]: s.color }}
-                          aria-label={`${a.customer.name}, ${fmtTime(a.start_at, tz)}`}>
-                          <div className="appt-name truncate">{a.customer.name}</div>
+                          aria-label={`${a.guest_name && a.event_id ? `${a.guest_name} (${a.customer.name})` : a.customer.name}, ${fmtTime(a.start_at, tz)}`}>
+                          <div className="appt-name truncate">{a.event_id && <Icon name="heart" size={12} className="appt-event-icon" />}{a.event_id && a.guest_name ? `${a.guest_name} · ${a.customer.name}` : a.customer.name}</div>
                           {h > 34 && <div className="appt-meta truncate">{a.services.map((x) => x.name).join(', ')}</div>}
                           {h > 52 && <div className="appt-meta num">{fmtTime(a.start_at, tz)} – {fmtTime(a.end_at, tz)}</div>}
                           {a.source === 'whatsapp' && h > 34 && <Icon name="whatsapp" size={14} style={{ position: 'absolute', right: 7, top: 7, color: '#1f7a4d' }} />}
@@ -158,6 +165,7 @@ export function CalendarBoard({ salonId, date, today, nowIso, branchHours, appoi
         {!columns.length && <p className="muted">Add your team under Team to start booking.</p>}
       </div>
 
+      {newEvent && <NewEventSheet open={eventOpen} onClose={() => setEventOpen(false)} menu={menu} today={today} methods={newEvent.methods} waConnected={newEvent.waConnected} />}
       <NewAppointmentSheet open={!!draft} onClose={() => setDraft(null)} menu={menu} date={date}
         time={draft?.time || undefined} staffId={draft?.staffId || undefined} />
       <AppointmentSheet appt={selected} onClose={() => setSelected(null)} menu={menu} canBill={canBill} />

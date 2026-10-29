@@ -95,7 +95,10 @@ export async function updateBilling(input: BillingSettingsInput): Promise<Action
   } catch (e) { return fail(e); }
 }
 
-export interface PaymentSettingsInput { methods: PayMethod[]; upiVpa: string | null; upiPayeeName: string | null; receiptSize: ReceiptSize }
+export interface PaymentSettingsInput { methods: PayMethod[]; upiVpa: string | null; upiPayeeName: string | null; receiptSize: ReceiptSize
+  /** Advance / cancellation policy printed on advance receipts (optional). */
+  advancePolicy?: string | null;
+}
 
 /** Payment types the desk sees, the salon's own UPI ID for pay-by-QR, and the default receipt paper. */
 export async function updatePayments(input: PaymentSettingsInput): Promise<ActionResult> {
@@ -111,6 +114,7 @@ export async function updatePayments(input: PaymentSettingsInput): Promise<Actio
     if (!['a4', '80', '58'].includes(input.receiptSize)) return { ok: false, error: 'Choose A4, 80 mm or 58 mm for receipts.' };
     must(await ctx.supabase.from('salons').update({
       payment_methods: methods, upi_vpa: vpa, upi_payee_name: vpa ? payee : null, receipt_size: input.receiptSize,
+      ...(input.advancePolicy !== undefined ? { advance_policy: text(input.advancePolicy, 500) } : {}),
     }).eq('id', ctx.salon.id));
     refresh();
     return { ok: true, message: 'Payment settings saved' };

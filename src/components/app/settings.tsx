@@ -271,11 +271,12 @@ function PaymentsSection({ salon }: { salon: Salon }) {
   const [vpa, setVpa] = useState(salon.upi_vpa ?? '');
   const [payee, setPayee] = useState(salon.upi_payee_name ?? salon.name);
   const [paper, setPaper] = useState<ReceiptSize>(salon.receipt_size ?? '80');
+  const [policy, setPolicy] = useState(salon.advance_policy ?? '');
   const { pending, error, run } = useSave();
   const toggle = (m: PayMethod) => setMethods((cur) => (cur.includes(m) ? cur.filter((x) => x !== m) : [...cur, m]));
   const vpaClean = vpa.trim();
   const vpaOk = isValidVpa(vpaClean);
-  const save = () => run(() => updatePayments({ methods, upiVpa: vpaClean || null, upiPayeeName: payee, receiptSize: paper }));
+  const save = () => run(() => updatePayments({ methods, upiVpa: vpaClean || null, upiPayeeName: payee, receiptSize: paper, advancePolicy: policy }));
 
   return (
     <Section id="payments" title="Payments & receipts" description="How clients pay you, and what the bill printer prints."
@@ -319,6 +320,10 @@ function PaymentsSection({ salon }: { salon: Salon }) {
           <Segmented label="Receipt size" value={paper} onChange={setPaper} options={PAPERS.map((x) => ({ value: x.value, label: x.label }))} />
           <span className="hint">{PAPERS.find((x) => x.value === paper)?.hint}. Used for “Print receipt” after saving a bill; you can pick another size on any bill.</span>
         </div>
+
+        <TextArea label="Advance and cancellation policy (optional)" rows={2} maxLength={500} value={policy} onChange={(e) => setPolicy(e.target.value)}
+          placeholder="e.g. Advances for bridal bookings are refundable up to 7 days before the event."
+          hint="Printed on advance receipts for bridal and event bookings. Styile never keeps an advance automatically — refunds are recorded by the owner or a manager." />
       </div>
     </Section>
   );
