@@ -39,7 +39,7 @@ test('only photos in this salon’s folder of our bucket are accepted', () => {
   assert.ok(!isStaffPhotoUrl('https://evil.example/x.jpg', SB, SALON));
   assert.ok(!isStaffPhotoUrl(`${SB}/storage/v1/object/public/staff-photos/${SALON}/../${OTHER}/x.jpg`, SB, SALON), 'no path tricks');
   assert.ok(!isStaffPhotoUrl(`${SB}/storage/v1/object/public/staff-photos/${SALON}/x.jpg" onerror="x`, SB, SALON));
-  assert.ok(!isStaffPhotoUrl(good.replace('https:', 'http:'), SB.replace('https:', 'http:'), SALON), 'https only');
+  assert.ok(!isStaffPhotoUrl((good as string).replace('https:', 'http:'), SB.replace('https:', 'http:'), SALON), 'https only');
   assert.equal(staffPhotoPath(good, SB), `${SALON}/${ID(1)}-1730000000000.jpg`);
   assert.equal(staffPhotoPath('https://evil.example/x.jpg', SB), null);
 });

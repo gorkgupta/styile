@@ -49,14 +49,15 @@ jobs:
         with:
           node-version: 22
       - run: npm install --no-audit --no-fund
-      - name: Type check (real Next.js, React and Supabase types)
-        run: |
-          set -o pipefail
-          npx tsc --noEmit --pretty false 2>&1 | tee ci-report.txt
-      - name: Next.js production build
+      # next build generates next-env.d.ts (React/Next JSX types) and type-checks the app.
+      - name: Next.js production build (includes type check)
         run: |
           set -o pipefail
           npx next build 2>&1 | tee ci-report.txt
+      - name: Type check everything incl. tests
+        run: |
+          set -o pipefail
+          npx tsc --noEmit --pretty false 2>&1 | tee ci-report.txt
       - name: Cloudflare Workers build (OpenNext)
         run: |
           set -o pipefail
