@@ -3,6 +3,7 @@ import { useActionState, useEffect, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { Notice, SubmitButton, TextField } from '@/components/ui/ui';
 import { Icon, type IconName } from '@/components/ui/icons';
+import { PhoneInput } from '@/components/ui/phone-input';
 import { createSalon, signIn, signUp } from '@/actions/auth';
 import type { ActionResult } from '@/lib/types';
 import { TRIAL_DAYS } from '@/lib/plans';
@@ -154,13 +155,7 @@ export function OnboardingForm({ ownerName, appHost }: { ownerName: string; appH
           </span>
         </div>
         <div className="grid-2">
-          <div className="field">
-            <label htmlFor="ob-phone">Salon mobile number</label>
-            <div className="prefix-input">
-              <span>+91</span>
-              <input id="ob-phone" className="input" name="phone" inputMode="tel" autoComplete="tel-national" placeholder="98765 43210" />
-            </div>
-          </div>
+          <PhoneInput id="ob-phone" name="phone" label="Salon mobile number" />
           <TextField label="City" name="city" placeholder="Bengaluru" autoComplete="address-level2" />
         </div>
         <TextField label="Your name" name="owner_name" defaultValue={ownerName} hint="Shown on the calendar as the first stylist. You can rename it later." />

@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState, useTransition } from 'react';
 import { Avatar, Button, SearchInput, TextField, useToast } from '@/components/ui/ui';
 import { Icon } from '@/components/ui/icons';
+import { PhoneInput } from '@/components/ui/phone-input';
 import { searchClients, quickCreateClient, type ClientLite } from '@/actions/appointments';
 import { money } from '@/lib/billing';
 import { formatPhone } from '@/lib/phone';
@@ -45,7 +46,7 @@ export function ClientPicker({ value, onChange }: { value: ClientLite | null; on
         <div className="between"><h3>New client</h3><Button size="sm" variant="ghost" onClick={() => setAdding(false)}>Search instead</Button></div>
         <div className="grid-2">
           <TextField label="Name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
-          <TextField label="Mobile number" inputMode="tel" placeholder="98765 43210" value={phone} onChange={(e) => setPhone(e.target.value)} error={error} />
+          <PhoneInput label="Mobile number" value={phone} onChange={(v) => setPhone(v)} error={error} />
         </div>
         <Button variant="primary" loading={pending} onClick={() => start(async () => {
           const r = await quickCreateClient({ name, phone });

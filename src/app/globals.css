@@ -130,6 +130,16 @@ img, svg { display: block; }
 .prefix-input { display: flex; align-items: stretch; }
 .prefix-input > span { display: flex; align-items: center; padding: 0 10px; border: 1px solid var(--line-strong); border-right: 0; border-radius: var(--radius) 0 0 var(--radius); background: var(--paper); color: var(--ink-2); font-size: 14px; }
 .prefix-input > .input { border-radius: 0 var(--radius) var(--radius) 0; }
+/* PhoneInput: a native select (invisible, on top) shows "+975" in the prefix; the list reads "+975 Bhutan". */
+.phone-input { display: flex; align-items: stretch; }
+.phone-cc { position: relative; flex: none; display: flex; align-items: center; gap: 3px; padding: 0 8px 0 10px; border: 1px solid var(--line-strong); border-right: 0;
+  border-radius: var(--radius) 0 0 var(--radius); background: var(--paper); color: var(--ink-2); font-size: 14px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.phone-cc > svg { color: var(--muted); }
+.phone-cc > select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 16px; border: 0; }
+.phone-cc:hover { background: var(--surface); }
+.phone-cc:focus-within { border-color: var(--peacock); box-shadow: var(--focus); z-index: 1; }
+.phone-input > .input { border-radius: 0 var(--radius) var(--radius) 0; min-width: 0; }
+.phone-input > .input:focus { position: relative; z-index: 1; }
 .check { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14.5px; }
 .check input { width: 18px; height: 18px; accent-color: var(--peacock); }
 .switch { position: relative; display: inline-flex; align-items: center; gap: 10px; cursor: pointer; }

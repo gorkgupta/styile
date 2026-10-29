@@ -3,7 +3,7 @@ import { revalidatePath } from 'next/cache';
 import { getSalonContext } from '@/lib/context';
 import { fail, must } from '@/lib/actions';
 import { can } from '@/lib/permissions';
-import { normalizePhone } from '@/lib/phone';
+import { invalidPhoneMessage, normalizePhone } from '@/lib/phone';
 import { isValidDateStr } from '@/lib/time';
 import type { ActionResult } from '@/lib/types';
 
@@ -28,7 +28,7 @@ export async function saveCustomer(input: CustomerInput): Promise<ActionResult<{
     const name = input.name?.trim();
     if (!name) return { ok: false, error: 'Enter the client’s name.' };
     const phone = normalizePhone(input.phone);
-    if (!phone) return { ok: false, error: 'Enter a valid 10-digit mobile number.' };
+    if (!phone) return { ok: false, error: invalidPhoneMessage(input.phone) };
     const email = input.email?.trim() || null;
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: 'That email address doesn’t look right.' };
     const birthday = input.birthday?.trim() || null;

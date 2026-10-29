@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { notFound } from 'next/navigation';
-import { normalizePhone } from '@/lib/phone';
+import { phoneFromAuth } from '@/lib/phone';
 import { findSiteSalon } from '@/lib/salon-site';
 import { salonSiteBase } from '@/lib/site';
 import { PortalHome, type PortalBill, type PortalVisit } from '@/components/portal/portal';
@@ -32,7 +32,7 @@ export default async function Page({ params }: { params: Promise<{ slug: string 
   const { data: auth } = await supabase.auth.getUser();
   const user = auth.user;
   if (!user) redirect(`${base}/me/login`);
-  const phone = user.phone && user.phone_confirmed_at ? normalizePhone(user.phone) : null;
+  const phone = user.phone && user.phone_confirmed_at ? phoneFromAuth(user.phone) : null;
   if (!phone) redirect(`${base}/me/login`); // staff accounts (email) have no client bookings
 
   // Link any client records salons created for this number since the last visit.

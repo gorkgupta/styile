@@ -9,6 +9,7 @@ import { removeStaffPhoto, StylistProfileFields, type StylistProfileValue } from
 import { changeMemberRole, deactivateStaff, inviteMember, removeMember, saveStaff } from '@/actions/team';
 import { daysLabel, openDays, WEEK_DAYS } from '@/lib/hours';
 import { formatPhone } from '@/lib/phone';
+import { PhoneInput } from '@/components/ui/phone-input';
 import { nextStaffColor, STAFF_COLORS } from '@/lib/staff-colors';
 import type { Hours, MemberRole, Service, ServiceCategory, Staff } from '@/lib/types';
 import { ROLE_LABEL } from '@/lib/types';
@@ -143,7 +144,7 @@ function StaffSheet({ salonId, editing, onClose, team, services, categories, ski
     const s = editing === 'new' ? null : editing;
     setName(s?.name ?? '');
     setTitle(s?.title ?? '');
-    setPhone(s?.phone ? formatPhone(s.phone).replace(/^\+91 /, '') : '');
+    setPhone(s?.phone ? formatPhone(s.phone) : '');
     setColor(s?.color?.toUpperCase() ?? nextStaffColor(team.filter((t) => t.active).map((t) => t.color)));
     setCommission(String(Number(s?.commission_pct ?? 0)));
     setBookable(s?.bookable ?? true);
@@ -215,12 +216,7 @@ function StaffSheet({ salonId, editing, onClose, team, services, categories, ski
               <TextField label="Title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={60} placeholder="Senior stylist" />
             </div>
             <div className="grid-2">
-              <div className="field">
-                <label htmlFor="staff-phone">Mobile number</label>
-                <div className="prefix-input"><span>+91</span>
-                  <input id="staff-phone" className="input" inputMode="tel" placeholder="98765 43210" value={phone} onChange={(e) => setPhone(e.target.value)} />
-                </div>
-              </div>
+              <PhoneInput id="staff-phone" label="Mobile number" value={phone} onChange={(v) => setPhone(v)} />
               <div className="field">
                 <label htmlFor="staff-comm">Commission</label>
                 <div className="suffix-input">

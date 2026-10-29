@@ -6,7 +6,7 @@ import { fail, must } from '@/lib/actions';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { env } from '@/lib/env';
 import { cleanHours } from '@/lib/hours';
-import { normalizePhone } from '@/lib/phone';
+import { invalidPhoneMessage, normalizePhone } from '@/lib/phone';
 import { cleanBio, cleanSpecialties, cleanYears, isStaffPhotoUrl } from '@/lib/stylists';
 import type { ActionResult, Hours, MemberRole } from '@/lib/types';
 import { ROLE_LABEL } from '@/lib/types';
@@ -54,7 +54,7 @@ export async function saveStaff(input: StaffInput): Promise<ActionResult<{ id: s
     let phone: string | null = null;
     if (input.phone && input.phone.trim()) {
       phone = normalizePhone(input.phone);
-      if (!phone) return { ok: false, error: 'Enter a valid 10-digit mobile number, or leave it blank.' };
+      if (!phone) return { ok: false, error: `${invalidPhoneMessage(input.phone).replace(/\.$/, '')}, or leave it blank.` };
     }
     const title = (input.title ?? '').trim().slice(0, 60) || null;
     const color = (input.color ?? '').toUpperCase();

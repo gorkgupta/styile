@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/server';
 import { ACTIVE_SALON_COOKIE } from '@/lib/context';
 import { isReservedSlug, rootDomain, salonUrl, SLUG_RE } from '@/lib/tenant';
 import { errorMessage } from '@/lib/actions';
-import { normalizePhone } from '@/lib/phone';
+import { invalidPhoneMessage, normalizePhone } from '@/lib/phone';
 import { safeNextPath } from '@/lib/safe-next';
 import type { ActionResult } from '@/lib/types';
 
@@ -66,7 +66,7 @@ export async function createSalon(_: ActionResult | null, form: FormData): Promi
   if (name.length < 2) return { ok: false, error: 'Enter your salon name.' };
   if (!SLUG_RE.test(slug)) return { ok: false, error: 'Your salon address can use lowercase letters, numbers and dashes (3–40 characters).' };
   if (isReservedSlug(slug)) return { ok: false, error: `“${slug}” is reserved. Try your salon’s name, for example ${slug}-salon.` };
-  if (phoneRaw && !phone) return { ok: false, error: 'Enter a valid 10-digit mobile number.' };
+  if (phoneRaw && !phone) return { ok: false, error: invalidPhoneMessage(phoneRaw) };
   const { data, error } = await supabase.rpc('create_salon', {
     p_name: name, p_slug: slug, p_phone: phone, p_city: String(form.get('city') || '').trim() || null,
     p_owner_name: String(form.get('owner_name') || '').trim() || null, p_seed_menu: form.get('seed') !== 'off',

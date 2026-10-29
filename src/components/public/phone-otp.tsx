@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { normalizePhone } from '@/lib/phone';
+import { invalidPhoneMessage, normalizePhone, toE164 } from '@/lib/phone';
 
 // Phone sign-in for clients: Supabase phone OTP. The project's SMS hook (api/auth/sms-hook) delivers the
 // code on WhatsApp from the platform number, so the UI says "WhatsApp".
@@ -19,8 +19,9 @@ export function usePhoneOtp() {
 
   useEffect(() => () => { if (timer.current) clearInterval(timer.current); }, []);
 
+  // phoneInput is a PhoneInput value ("+975 17 12 34 56"); any country works, Supabase gets E.164.
   const digits = normalizePhone(phoneInput);
-  const valid = !!digits && /^91[6-9]\d{9}$/.test(digits);
+  const valid = !!digits;
 
   function startCountdown() {
     setResendIn(30);
@@ -32,9 +33,9 @@ export function usePhoneOtp() {
   }
 
   async function send(): Promise<boolean> {
-    if (!valid || !digits) { setError('Enter a 10-digit Indian mobile number.'); return false; }
+    if (!valid || !digits) { setError(invalidPhoneMessage(phoneInput)); return false; }
     setBusy(true); setError(null);
-    const { error: err } = await createClient().auth.signInWithOtp({ phone: `+${digits}` });
+    const { error: err } = await createClient().auth.signInWithOtp({ phone: toE164(digits) });
     setBusy(false);
     if (err) {
       setError(/rate|seconds/i.test(err.message ?? '') ? 'Please wait a few seconds before asking for another code.' : 'We couldn’t send the code. Check the number and try again.');
@@ -48,7 +49,7 @@ export function usePhoneOtp() {
     const token = code.replace(/\D/g, '');
     if (token.length !== 6 || !digits) { setError('Enter the 6-digit code from WhatsApp.'); return false; }
     setBusy(true); setError(null);
-    const { error: err } = await createClient().auth.verifyOtp({ phone: `+${digits}`, token, type: 'sms' });
+    const { error: err } = await createClient().auth.verifyOtp({ phone: toE164(digits), token, type: 'sms' });
     setBusy(false);
     if (err) { setError(/expired/i.test(err.message ?? '') ? 'That code has expired. Ask for a new one.' : 'That code didn’t match. Check WhatsApp and try again.'); return false; }
     return true;
@@ -56,7 +57,7 @@ export function usePhoneOtp() {
 
   function changeNumber() { setStage('phone'); setCode(''); setError(null); }
 
-  return { phoneInput, setPhoneInput, code, setCode: (v: string) => setCode(v.replace(/\D/g, '').slice(0, 6)), stage, busy, error, setError, resendIn, valid, digits, send, verify, changeNumber };
+  return { phoneInput, setPhoneInput: (v: string) => { setPhoneInput(v); setError(null); }, code, setCode: (v: string) => setCode(v.replace(/\D/g, '').slice(0, 6)), stage, busy, error, setError, resendIn, valid, digits, send, verify, changeNumber };
 }
 
 export type PhoneOtp = ReturnType<typeof usePhoneOtp>;

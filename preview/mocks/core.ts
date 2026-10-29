@@ -1,10 +1,15 @@
 import { customers, services, appointments, TZ } from '../data';
 import { computeSlots } from '../../src/lib/availability';
 import { hours, NOW_ISO } from '../data';
+import { invalidPhoneMessage, normalizePhone } from '../../src/lib/phone';
 
 export const handlers: Record<string, (...args: any[]) => any> = {
   searchClients: (q: string) => ({ ok: true, data: customers.filter((c) => !q || c.name.toLowerCase().includes(q.toLowerCase()) || c.phone.includes(q.replace(/\D/g, ''))).slice(0, 8) }),
-  quickCreateClient: (i: { name: string; phone: string }) => ({ ok: true, data: { id: 'new', name: i.name, phone: '91' + i.phone.replace(/\D/g, '').slice(-10), visit_count: 0, last_visit_at: null } }),
+  quickCreateClient: (i: { name: string; phone: string }) => {
+    const phone = normalizePhone(i.phone);
+    if (!phone) return { ok: false, error: invalidPhoneMessage(i.phone) };
+    return { ok: true, data: { id: 'new', name: i.name, phone, visit_count: 0, last_visit_at: null } };
+  },
   findSlots: (i: { serviceIds: string[]; date: string; staffId?: string }) => ({
     ok: true,
     data: computeSlots({

@@ -5,7 +5,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 import { loadCatalog } from '@/lib/booking';
 import { localDate } from '@/lib/time';
-import { normalizePhone } from '@/lib/phone';
+import { phoneFromAuth } from '@/lib/phone';
 import { BookingFlow } from '@/components/public/booking-flow';
 import { salonSiteBase } from '@/lib/site';
 import { isReservedSlug } from '@/lib/tenant';
@@ -55,7 +55,7 @@ export default async function Page({ params, searchParams }: {
   let customerId: string | null = null;
   const supabase = await createClient();
   const { data: auth } = await supabase.auth.getUser();
-  const phone = auth.user?.phone && auth.user.phone_confirmed_at ? normalizePhone(auth.user.phone) : null;
+  const phone = auth.user?.phone && auth.user.phone_confirmed_at ? phoneFromAuth(auth.user.phone) : null;
   if (auth.user && phone) {
     const { data: existing } = await db.from('customers').select('id, name').eq('salon_id', salon.id).eq('phone', phone).maybeSingle();
     const meta = (auth.user.user_metadata ?? {}) as { full_name?: string };

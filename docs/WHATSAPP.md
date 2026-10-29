@@ -59,4 +59,6 @@ Voice notes and images aren't understood yet; the assistant asks the client to t
 
 ## 5. Costs (India, from 1 Oct 2026)
 
-Meta charges ₹0.115 per utility/service message (first 1,000 service replies a month per number are free) and ₹0.8631 per marketing message. Claude (default model `claude-haiku-5-5`) costs a few paise per conversation. Styile's plans include a monthly number of assistant conversations; set your price with these costs in mind.
+Meta charges ₹0.115 per utility/service message (first 1,000 service replies a month per number are free) and ₹0.8631 per marketing message.
+
+**Login codes to clients abroad.** Client sign-in codes go from the platform number as *Authentication* template messages. Clients can sign in with a non-Indian number (Bhutan +975 is common at border towns like Jaigaon; Nepal +977, Bangladesh +880 and any other country work too), and Meta bills authentication messages by the **recipient's country**: a code sent to a +975 number is charged at Meta's international authentication rate for Bhutan, not the Indian rate. Check Meta's current rate card (WhatsApp Manager → Insights, or Meta's pricing page) and watch the platform number's spend if many clients sign in from abroad. Salon messages (confirmations, reminders, bills) to those clients are likewise billed at the client's country rate, to the salon's WhatsApp account. Claude (default model `claude-haiku-5-5`) costs a few paise per conversation. Styile's plans include a monthly number of assistant conversations; set your price with these costs in mind.
