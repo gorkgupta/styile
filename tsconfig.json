@@ -17,5 +17,5 @@
     "paths": { "@/*": ["./src/*"] }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts", "cloudflare-env.d.ts"],
-  "exclude": ["node_modules", "preview"]
+  "exclude": ["node_modules", "preview", "scripts/typecheck"]
 }

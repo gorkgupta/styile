@@ -35,12 +35,14 @@ export const requireUser = cache(async () => {
 export const getSalonContext = cache(async (): Promise<SalonContext> => {
   const { supabase, user } = await requireUser();
 
-  const [{ data: memberships }, { data: profile }] = await Promise.all([
+  const [{ data: membershipRows }, { data: profile }] = await Promise.all([
     supabase.from('salon_members').select('salon_id, role, staff_id, salons(name, slug)').eq('user_id', user.id),
     supabase.from('profiles').select('full_name, is_platform_admin, locale').eq('id', user.id).maybeSingle(),
   ]);
 
-  if (!memberships?.length) {
+  type MemberRow = { salon_id: string; role: string; staff_id: string | null; salons: unknown };
+  const memberships = (membershipRows ?? []) as MemberRow[];
+  if (!memberships.length) {
     redirect(mainUrl(profile?.is_platform_admin ? '/admin' : '/onboarding'));
   }
   const slugOf = (m: { salons: unknown }) => (m.salons as { slug?: string } | null)?.slug ?? '';
@@ -48,7 +50,7 @@ export const getSalonContext = cache(async (): Promise<SalonContext> => {
   // On a salon's own address (glowstudio.styile.com/app) the app is locked to that salon.
   const h = await headers();
   const hostSlug = h.get(SALON_HEADER);
-  let active;
+  let active: MemberRow | undefined;
   if (hostSlug) {
     active = memberships.find((m) => slugOf(m) === hostSlug);
     if (!active) redirect(mainUrl(`/app?not_member=${encodeURIComponent(hostSlug)}`));

@@ -1,0 +1,89 @@
+name: CI
+
+# Builds the real app and runs every test on each pull request and on main.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  test:
+    name: Tests (logic + database)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - name: Unit and assistant tests
+        run: npm test
+      - name: Database tests (schema, security, billing) on PostgreSQL 16
+        run: |
+          ls /usr/lib/postgresql/16/bin/initdb || (sudo apt-get update && sudo apt-get install -y postgresql-16)
+          sudo bash scripts/db-test/run.sh | tee db-test.log
+          grep -q "ALL DATABASE TESTS PASSED" db-test.log
+
+  build:
+    name: Type check and build
+    runs-on: ubuntu-24.04
+    env:
+      # Placeholder values so the build can run; real values are set in Cloudflare.
+      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder
+      NEXT_PUBLIC_APP_URL: https://styile.com
+      NEXT_PUBLIC_ROOT_DOMAIN: styile.com
+      NEXT_PUBLIC_APP_NAME: Styile
+      NEXT_TELEMETRY_DISABLED: 1
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      # Type-check everything first so every error is listed at once (next build stops at the first one).
+      # next-env.d.ts is normally written by next build; it brings in the Next/React JSX types.
+      - name: Type check everything incl. tests
+        run: |
+          set -o pipefail
+          printf '/// <reference types="next" />\n/// <reference types="next/image-types/global" />\n' > next-env.d.ts
+          npx tsc --noEmit --pretty false 2>&1 | tee ci-report.txt
+      - name: Next.js production build
+        run: |
+          set -o pipefail
+          npx next build 2>&1 | tee ci-report.txt
+      - name: Cloudflare Workers build (OpenNext)
+        run: |
+          set -o pipefail
+          npx opennextjs-cloudflare build 2>&1 | tee ci-report.txt
+      - name: Report the result on the pull request
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v8
+        env:
+          OUTCOME: ${{ job.status }}
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- styile-ci-report -->';
+            let log = fs.existsSync('ci-report.txt') ? fs.readFileSync('ci-report.txt', 'utf8') : '';
+            // Keep the useful part: errors first, then the end of the log.
+            const errors = log.split('\n').filter((l) => /error|Error|failed|Failed|Type error/.test(l));
+            let text = errors.length ? errors.join('\n') : log.split('\n').slice(-80).join('\n');
+            if (text.length > 60000) text = text.slice(0, 60000) + '\n… (truncated)';
+            const ok = process.env.OUTCOME === 'success';
+            const body = `${marker}\n### Build check: ${ok ? 'passed ✅' : 'failed ❌'}\n` +
+              (ok ? 'Type check, Next.js build and Cloudflare build all passed.' : '```\n' + text + '\n```');
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
+            const mine = comments.find((c) => c.body && c.body.includes(marker));
+            if (mine) await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
+            else await github.rest.issues.createComment({ owner, repo, issue_number, body });

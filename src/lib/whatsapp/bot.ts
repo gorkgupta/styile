@@ -103,7 +103,7 @@ async function handleMessage(phoneNumberId: string, profileName: string | null, 
     const catalog = await loadCatalog(db, salon.id);
     const { data: past } = await db.from('wa_messages').select('direction, body, kind').eq('conversation_id', conv.id)
       .neq('id', stored[0].id).order('created_at', { ascending: false }).limit(20);
-    const history = (past ?? []).reverse()
+    const history = ((past ?? []) as { direction: string; body: string | null; kind: string }[]).reverse()
       .filter((x) => x.body && x.kind !== 'template')
       .map((x) => ({ role: x.direction === 'in' ? 'user' as const : 'assistant' as const, text: x.body as string }));
 
@@ -182,8 +182,8 @@ async function handleMessage(phoneNumberId: string, profileName: string | null, 
           db.from('client_packages').select(CLIENT_PACKAGE_SELECT).eq('salon_id', salon.id).eq('customer_id', customer.id).eq('status', 'active').gte('expires_on', today).order('expires_on'),
           db.from('client_memberships').select('*').eq('salon_id', salon.id).eq('customer_id', customer.id).eq('status', 'active').gte('ends_on', today).order('ends_on'),
         ]);
-        const packages = (pk ?? []).map(normalizeClientPackage).filter((p) => packageState(p, today) === 'active');
-        const card = (cards ?? []).map(normalizeMembership).find((m) => ['active', 'upcoming'].includes(membershipState(m, today))) ?? null;
+        const packages = ((pk ?? []) as unknown[]).map(normalizeClientPackage).filter((p) => packageState(p, today) === 'active');
+        const card = ((cards ?? []) as unknown[]).map(normalizeMembership).find((m) => ['active', 'upcoming'].includes(membershipState(m, today))) ?? null;
         return {
           packages: packages.map((p) => ({ name: p.name, expires_on: p.expires_on, items: p.items.map((i) => ({ name: i.name, left: sessionsLeft(i), total: i.sessions_total })) })),
           membership: card ? { name: card.name, starts_on: card.starts_on, ends_on: card.ends_on, service_discount_pct: card.service_discount_pct, product_discount_pct: card.product_discount_pct } : null,

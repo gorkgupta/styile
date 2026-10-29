@@ -18,10 +18,10 @@ export async function getDayAppointments(db: SupabaseClient, salonId: string, da
     .lt('start_at', zonedToUtc(addDays(date, 1), '00:00', tz).toISOString())
     .order('start_at');
   if (error) throw error;
-  return (data ?? []).map((a) => ({
+  return ((data ?? []) as { services?: { sort: number }[] }[]).map((a) => ({
     ...a,
-    services: [...(a.services ?? [])].sort((x: { sort: number }, y: { sort: number }) => x.sort - y.sort),
-  })) as AppointmentFull[];
+    services: [...(a.services ?? [])].sort((x, y) => x.sort - y.sort),
+  })) as unknown as AppointmentFull[];
 }
 
 export async function getMenu(db: SupabaseClient, salonId: string): Promise<{ services: Service[]; categories: ServiceCategory[] }> {
@@ -78,10 +78,10 @@ export async function getClientBenefits(db: SupabaseClient, salonId: string, cus
   ]);
   if (pk.error) throw pk.error;
   if (mem.error) throw mem.error;
-  const open = (adv.data ?? []).map(normalizeAdvance).filter((a) => advanceLeft(a) > 0);
+  const open = ((adv.data ?? []) as unknown[]).map(normalizeAdvance).filter((a) => advanceLeft(a) > 0);
   return {
-    packages: (pk.data ?? []).map(normalizeClientPackage).filter((p) => packageState(p, today) === 'active'),
-    membership: activeMembership((mem.data ?? []).map(normalizeMembership), today),
+    packages: ((pk.data ?? []) as unknown[]).map(normalizeClientPackage).filter((p) => packageState(p, today) === 'active'),
+    membership: activeMembership(((mem.data ?? []) as unknown[]).map(normalizeMembership), today),
     advance: { left: Math.round(open.reduce((s, a) => s + advanceLeft(a), 0) * 100) / 100, receipts: open.map((a) => a.receipt_no) },
   };
 }
@@ -94,5 +94,5 @@ export async function getClientPackagesAndCards(db: SupabaseClient, salonId: str
   ]);
   if (pk.error) throw pk.error;
   if (mem.error) throw mem.error;
-  return { packages: (pk.data ?? []).map(normalizeClientPackage), memberships: (mem.data ?? []).map(normalizeMembership) };
+  return { packages: ((pk.data ?? []) as unknown[]).map(normalizeClientPackage), memberships: ((mem.data ?? []) as unknown[]).map(normalizeMembership) };
 }

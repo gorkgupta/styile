@@ -76,7 +76,7 @@ export async function createAppointment(input: NewAppointmentInput): Promise<Act
     if (Number.isNaN(start.getTime())) return { ok: false, error: 'Pick a time.' };
     // Online and WhatsApp bookings come only from those channels (reports count bookings by source).
     if (input.source && !['staff', 'phone', 'walk_in'].includes(input.source)) return { ok: false, error: 'Pick how the client booked.' };
-    const services = must(await supabase.from('services').select('id, name, price, duration_min').eq('salon_id', salon.id).in('id', input.serviceIds));
+    const services = must(await supabase.from('services').select('id, name, price, duration_min').eq('salon_id', salon.id).in('id', input.serviceIds)) as { id: string; name: string; price: number; duration_min: number }[];
     if (services.length !== new Set(input.serviceIds).size) return { ok: false, error: 'One of the services was removed. Refresh and try again.' };
     const ordered = input.serviceIds.map((id) => services.find((s) => s.id === id)!);
     const minutes = ordered.reduce((s, x) => s + x.duration_min, 0);
