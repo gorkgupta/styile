@@ -16,8 +16,11 @@ export function fail(e: unknown): ActionResult<never> {
   return { ok: false, error: errorMessage(e) };
 }
 
-/** Throw on a Supabase error so callers can use try/catch + fail(). */
-export function must<T>(res: { data: T; error: unknown }): T {
+/**
+ * Throw on a Supabase error so callers can use try/catch + fail().
+ * Without an error, data is present for selects and .single(); writes without .select() return null, which callers ignore.
+ */
+export function must<T>(res: { data: T | null; error: unknown }): T {
   if (res.error) throw res.error;
-  return res.data;
+  return res.data as T;
 }

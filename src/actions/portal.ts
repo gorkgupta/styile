@@ -28,7 +28,8 @@ async function myAppointment(appointmentId: unknown) {
   const { data } = await db.from('appointments')
     .select('id, salon_id, customer_id, staff_id, customer:customers(user_id)')
     .eq('id', appointmentId).maybeSingle();
-  const owner = (data?.customer as { user_id: string | null } | null)?.user_id;
+  // supabase-js types the embed as an array; the FK makes it a single object.
+  const owner = (data?.customer as unknown as { user_id: string | null } | null)?.user_id;
   if (!data || owner !== userId) throw new BookingError('Booking not found');
   return { db, salonId: data.salon_id as string, customerId: data.customer_id as string, id: data.id as string, staffId: (data.staff_id as string | null) ?? null };
 }
