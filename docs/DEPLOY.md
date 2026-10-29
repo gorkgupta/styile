@@ -7,7 +7,7 @@ Time needed: about an hour for the first deploy, plus Meta's review time for Wha
 1. Create a project — region **Mumbai (ap-south-1)** keeps data in India and latency low.
 2. Apply the database: either
    * `npx supabase link --project-ref <ref>` then `npx supabase db push` (runs `supabase/migrations/*` in order), or
-   * paste `0001_schema.sql`, `0002_security.sql`, `0003_functions.sql` into **SQL editor** one after another.
+   * paste every file in `supabase/migrations` into the **SQL editor**, one after another in number order — currently `0001_schema.sql` through `0015_locale.sql` (15 files). Skipping one breaks the files after it. When a later pull request adds a new migration file, run just that new file the same way (or `npx supabase db push` again).
 3. **Authentication → URL configuration**: Site URL `https://styile.com`; add both `https://styile.com/**` and `https://*.styile.com/**` to redirect URLs (salon sites live on subdomains).
 4. **Authentication → Providers**:
    * **Email**: on (owners and staff sign in with email + password). Keep "Confirm email" on.
@@ -28,6 +28,8 @@ The app is a standard Next.js app built for Workers with `@opennextjs/cloudflare
 * Build command: `npx opennextjs-cloudflare build`
 * Deploy command: `npx opennextjs-cloudflare deploy`
 * Build variables (needed at build time): `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_APP_URL` (`https://styile.com`), `NEXT_PUBLIC_ROOT_DOMAIN` (`styile.com`), `NEXT_PUBLIC_APP_NAME`, `NEXT_PUBLIC_SUPPORT_EMAIL`.
+
+With this setup, every pull request you merge into `main` is built and deployed automatically. Every pull request also gets a "Build check" comment from GitHub; only merge when it says passed ✅.
 
 **From your laptop:** `npm install`, `npx wrangler login`, `npm run deploy`.
 
@@ -72,7 +74,7 @@ Follow `docs/WHATSAPP.md` (Meta app, webhook, templates, connecting each salon's
 ## 4. Check it works
 
 1. `npm test` (logic, assistant flows, signatures) and `npm run db:test` (needs a local Postgres 16: schema + security rules).
-2. Sign up at `/signup`, create a salon at `/onboarding`, add a stylist, book from `/s/<your-slug>` on your phone.
+2. Sign up at `styile.com/signup`, create a salon at `/onboarding`, add a stylist, then book from `<your-slug>.styile.com` on your phone.
 3. In `/admin`, connect a WhatsApp number to the salon, then message it: "Hi, can I book a haircut tomorrow at 5?"
 
 ## Local development
