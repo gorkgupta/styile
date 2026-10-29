@@ -1,12 +1,15 @@
 // Mirrors public.create_invoice() exactly so the POS screen can show the bill before it is saved.
-// The database recomputes everything on save; tests in tests/billing.test.ts keep the two in step.
+// The database recomputes everything on save; tests/core.test.ts keeps the two in step (same numbers as scripts/db-test).
+import { COMPOSITION_RATE, type GstMode } from './gst';
 
 export interface BillLineInput {
   name: string;
   qty: number;
   unitPrice: number;
   discount?: number;  // rupees off this line
+  /** Services: the menu's override (null = statutory rate). Products: the rate chosen. Custom: optional. */
   gstRate?: number | null;
+  kind?: 'service' | 'product' | 'custom';
 }
 
 export interface BillLine extends BillLineInput {
@@ -17,6 +20,16 @@ export interface Bill {
   lines: BillLine[];
   subtotal: number; discountTotal: number; taxableTotal: number;
   cgst: number; sgst: number; taxTotal: number; roundOff: number; total: number;
+  /** Composition salons: the 6% they pay themselves (an estimate; never shown to the client). */
+  compositionTax: number;
+}
+
+export interface BillOptions {
+  /** Unregistered and composition salons never charge GST: every line is 0%. */
+  gstMode: GstMode;
+  pricesIncludeTax: boolean;
+  /** Statutory GST on services on the bill date (serviceGstRate(today)). */
+  serviceRate: number;
 }
 
 /** Round half away from zero to 2 decimals, matching Postgres numeric round(). */
@@ -29,10 +42,10 @@ export function round0(n: number): number {
   return s * Math.round(Math.abs(n) + 1e-9);
 }
 
-export function computeBill(items: BillLineInput[], opts: { pricesIncludeTax: boolean; defaultGstRate: number }): Bill {
+export function computeBill(items: BillLineInput[], opts: BillOptions): Bill {
   let subtotal = 0, discountTotal = 0, taxableTotal = 0, taxTotal = 0, lines = 0;
   const out: BillLine[] = items.map((it) => {
-    const rate = it.gstRate ?? opts.defaultGstRate;
+    const rate = opts.gstMode === 'regular' ? it.gstRate ?? opts.serviceRate : 0;
     const discount = round2(it.discount ?? 0);
     const base = round2(it.qty * it.unitPrice);
     const gross = round2(Math.max(base - discount, 0));
@@ -56,7 +69,21 @@ export function computeBill(items: BillLineInput[], opts: { pricesIncludeTax: bo
   return {
     lines: out, subtotal, discountTotal, taxableTotal,
     cgst, sgst: round2(taxTotal - cgst), taxTotal, roundOff: round2(total - lines), total,
+    compositionTax: opts.gstMode === 'composition' ? round2((total * COMPOSITION_RATE) / 100) : 0,
   };
+}
+
+/** GST per rate for a tax invoice's summary ("5% on ₹571.43 = ₹28.57"), highest rate last. */
+export function taxByRate(lines: { gst_rate: number | string; taxable: number | string; tax: number | string }[]) {
+  const by = new Map<number, { rate: number; taxable: number; tax: number }>();
+  for (const l of lines) {
+    const rate = Number(l.gst_rate);
+    const row = by.get(rate) ?? { rate, taxable: 0, tax: 0 };
+    row.taxable = round2(row.taxable + Number(l.taxable));
+    row.tax = round2(row.tax + Number(l.tax));
+    by.set(rate, row);
+  }
+  return [...by.values()].sort((a, b) => a.rate - b.rate);
 }
 
 const inr = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2, minimumFractionDigits: 0 });

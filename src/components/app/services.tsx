@@ -5,18 +5,27 @@ import { Badge, Button, Dialog, Empty, Notice, Panel, SearchInput, Segmented, Se
 import { Topbar } from './shell';
 import { archiveService, deleteCategory, saveCategory, saveService, updateServicePrice } from '@/actions/catalog';
 import { money } from '@/lib/billing';
-import type { Service, ServiceCategory } from '@/lib/types';
+import { SAC_CODES } from '@/lib/gst';
+import type { GstMode, Service, ServiceCategory } from '@/lib/types';
 
 export interface ServicesProps {
   services: Service[];      // including archived
   categories: ServiceCategory[];
-  defaultGstRate: number;
+  /** Statutory GST on salon services today (5% since 22 Sep 2025). */
+  serviceRate: number;
   pricesIncludeTax: boolean;
+  gstMode: GstMode;
 }
-
-const GST_RATES = [0, 5, 12, 18, 28];
 const GENDER_LABEL: Record<Service['gender'], string> = { unisex: 'Everyone', female: 'Women', male: 'Men' };
 const UNCATEGORISED = '__none';
+/** A first guess at the SAC for a new service from its name or category; the owner can change it. */
+function guessSac(name: string, category: string): string {
+  const t = `${name} ${category}`.toLowerCase();
+  if (/wax|thread|pierc|tattoo|henna|mehendi/.test(t)) return '999729';
+  if (/massage|body spa|\bspa\b|reflexology/.test(t) && !/hair/.test(t)) return '999723';
+  if (/facial|clean.?up|manicure|pedicure|nail|bleach|d.?tan|make.?up|bridal|skin|peel|hands/.test(t)) return '999722';
+  return '999721';
+}
 
 function duration(min: number) {
   if (min < 60) return `${min} min`;
@@ -24,7 +33,7 @@ function duration(min: number) {
   return m ? `${h} hr ${m} min` : `${h} hr`;
 }
 
-export function ServicesScreen({ services, categories, defaultGstRate, pricesIncludeTax }: ServicesProps) {
+export function ServicesScreen({ services, categories, serviceRate, pricesIncludeTax, gstMode }: ServicesProps) {
   const [q, setQ] = useState('');
   const [showArchived, setShowArchived] = useState(false);
   const [editing, setEditing] = useState<Service | 'new' | null>(null);
@@ -63,7 +72,8 @@ export function ServicesScreen({ services, categories, defaultGstRate, pricesInc
           <div className="grow" style={{ minWidth: 220, maxWidth: 360 }}><SearchInput value={q} onChange={setQ} placeholder="Find a service" /></div>
           {archivedCount > 0 && <Switch checked={showArchived} onChange={setShowArchived} label={<span className="small ink2">Show archived ({archivedCount})</span>} />}
           <span className="small muted" style={{ marginLeft: 'auto' }}>
-            Prices {pricesIncludeTax ? 'include' : 'exclude'} GST · default {defaultGstRate}%
+            {gstMode === 'regular' ? `Prices ${pricesIncludeTax ? 'include' : 'exclude'} GST · services ${serviceRate}%`
+              : gstMode === 'composition' ? 'Composition scheme · no GST charged to clients' : 'Not GST registered · no GST on bills'}
           </span>
         </div>
 
@@ -86,7 +96,7 @@ export function ServicesScreen({ services, categories, defaultGstRate, pricesInc
             </>}>
             {g.items.length ? (
               <ul className="list">
-                {g.items.map((s) => <Fragment key={s.id}><ServiceRow service={s} defaultGstRate={defaultGstRate} onOpen={() => setEditing(s)} /></Fragment>)}
+                {g.items.map((s) => <Fragment key={s.id}><ServiceRow service={s} serviceRate={serviceRate} onOpen={() => setEditing(s)} /></Fragment>)}
               </ul>
             ) : (
               <p className="panel-body small muted">No services here yet. <button type="button" className="link-btn" onClick={() => openNew(g.category?.id ?? null)}>Add one</button></p>
@@ -101,7 +111,7 @@ export function ServicesScreen({ services, categories, defaultGstRate, pricesInc
         )}
       </div>
 
-      <ServiceSheet service={editing} defaultCategory={newInCategory} categories={categories} defaultGstRate={defaultGstRate}
+      <ServiceSheet service={editing} defaultCategory={newInCategory} categories={categories} serviceRate={serviceRate} gstMode={gstMode}
         pricesIncludeTax={pricesIncludeTax} onClose={() => setEditing(null)} />
       <CategoryDialog category={catEdit} onClose={() => setCatEdit(null)} />
       <DeleteCategoryDialog category={catDelete} count={catDelete ? services.filter((s) => s.category_id === catDelete.id).length : 0} onClose={() => setCatDelete(null)} />
@@ -109,10 +119,10 @@ export function ServicesScreen({ services, categories, defaultGstRate, pricesInc
   );
 }
 
-function ServiceRow({ service: s, defaultGstRate, onOpen }: { service: Service; defaultGstRate: number; onOpen: () => void }) {
+function ServiceRow({ service: s, serviceRate, onOpen }: { service: Service; serviceRate: number; onOpen: () => void }) {
   const meta = [duration(s.duration_min)];
   if (s.gender !== 'unisex') meta.push(GENDER_LABEL[s.gender]);
-  if (s.gst_rate !== null && Number(s.gst_rate) !== Number(defaultGstRate)) meta.push(`GST ${Number(s.gst_rate)}%`);
+  if (s.gst_rate !== null && Number(s.gst_rate) !== Number(serviceRate)) meta.push(Number(s.gst_rate) === 0 ? 'GST exempt' : `GST ${Number(s.gst_rate)}%`);
   return (
     <li className={`svc-row${s.active ? '' : ' is-archived'}`}>
       <button type="button" className="svc-main" onClick={onOpen}>
@@ -174,8 +184,9 @@ function PriceCell({ service }: { service: Service }) {
   );
 }
 
-function ServiceSheet({ service, defaultCategory, categories, defaultGstRate, pricesIncludeTax, onClose }: {
-  service: Service | 'new' | null; defaultCategory: string | null; categories: ServiceCategory[]; defaultGstRate: number; pricesIncludeTax: boolean; onClose: () => void;
+function ServiceSheet({ service, defaultCategory, categories, serviceRate, gstMode, pricesIncludeTax, onClose }: {
+  service: Service | 'new' | null; defaultCategory: string | null; categories: ServiceCategory[]; serviceRate: number; gstMode: GstMode;
+  pricesIncludeTax: boolean; onClose: () => void;
 }) {
   const existing = service && service !== 'new' ? service : null;
   const [name, setName] = useState('');
@@ -183,6 +194,7 @@ function ServiceSheet({ service, defaultCategory, categories, defaultGstRate, pr
   const [durationMin, setDurationMin] = useState('30');
   const [price, setPrice] = useState('');
   const [gst, setGst] = useState('default');
+  const [sac, setSac] = useState('999721');
   const [gender, setGender] = useState<Service['gender']>('unisex');
   const [description, setDescription] = useState('');
   const [online, setOnline] = useState(true);
@@ -200,6 +212,7 @@ function ServiceSheet({ service, defaultCategory, categories, defaultGstRate, pr
     setDurationMin(String(s?.duration_min ?? 30));
     setPrice(s ? String(s.price) : '');
     setGst(s?.gst_rate === null || s?.gst_rate === undefined ? 'default' : String(Number(s.gst_rate)));
+    setSac(s?.sac_code ?? guessSac(s?.name ?? '', categories.find((c) => c.id === (s ? s.category_id : defaultCategory))?.name ?? ''));
     setGender(s?.gender ?? 'unisex');
     setDescription(s?.description ?? '');
     setOnline(s?.online_bookable ?? true);
@@ -210,7 +223,7 @@ function ServiceSheet({ service, defaultCategory, categories, defaultGstRate, pr
     setError(null);
     const r = await saveService({
       id: existing?.id, name, categoryId: categoryId || null, durationMin: Number(durationMin), price: Number(price.replace(/[,\s₹]/g, '')),
-      gstRate: gst === 'default' ? null : Number(gst), gender, description, onlineBookable: online, active: existing?.active ?? true,
+      gstRate: gst === 'default' ? null : Number(gst), sacCode: sac, gender, description, onlineBookable: online, active: existing?.active ?? true,
     });
     if (!r.ok) return setError(r.error);
     toast(r.message ?? 'Saved');
@@ -254,17 +267,26 @@ function ServiceSheet({ service, defaultCategory, categories, defaultGstRate, pr
             <div className="prefix-input"><span>₹</span>
               <input id="svc-price" className="input num" inputMode="decimal" placeholder="0" value={price} onChange={(e) => setPrice(e.target.value)} />
             </div>
-            <span className="hint">{pricesIncludeTax ? 'Including GST' : 'GST is added on the bill'}</span>
+            <span className="hint">{gstMode !== 'regular' ? 'No GST is added on your bills' : pricesIncludeTax ? 'Including GST' : 'GST is added on the bill'}</span>
           </div>
           <SelectField label="Duration" value={durationMin} onChange={(e) => setDurationMin(e.target.value)} hint="Blocks this much time on the calendar">
             {durationOptions.map((d) => <option key={d} value={d}>{duration(d)}</option>)}
           </SelectField>
         </div>
         <div className="grid-2">
-          <SelectField label="GST rate" value={gst} onChange={(e) => setGst(e.target.value)}>
-            <option value="default">Salon default ({defaultGstRate}%)</option>
-            {GST_RATES.map((r) => <option key={r} value={r}>{r}%</option>)}
+          <SelectField label="Kind of service (SAC)" value={sac} onChange={(e) => setSac(e.target.value)}
+            hint={`Printed on tax invoices as SAC ${sac}`}>
+            {SAC_CODES.map((c) => <option key={c.code} value={c.code}>{c.label} · {c.code}</option>)}
           </SelectField>
+          <SelectField label="GST" value={gst} onChange={(e) => setGst(e.target.value)}
+            hint={gst === 'default' ? (gstMode === 'regular' ? `All salon services: ${serviceRate}% since 22 Sep 2025` : 'Applies once you register for regular GST')
+              : gst === '0' ? 'Only if your CA confirms this service is exempt' : 'Set before the 2025 rate change. Switch to the standard rate.'}>
+            <option value="default">Standard rate ({serviceRate}%)</option>
+            <option value="0">Exempt (0%)</option>
+            {gst !== 'default' && gst !== '0' && <option value={gst}>{gst}% (old setting)</option>}
+          </SelectField>
+        </div>
+        <div className="grid-2">
           <div className="field">
             <span className="label">For</span>
             <Segmented label="Who this service is for" value={gender} onChange={setGender}

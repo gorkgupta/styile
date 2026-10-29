@@ -44,7 +44,11 @@ export interface Pending {
 }
 
 export interface EngineContext {
-  salon: { name: string; address: string | null; phone: string | null; tz: string; hours: Hours; instructions: string | null; windowDays: number; bookingUrl: string };
+  salon: {
+    name: string; address: string | null; phone: string | null; tz: string; hours: Hours; instructions: string | null; windowDays: number; bookingUrl: string;
+    /** How prices relate to GST at this salon (unregistered salons charge none). Defaults to "Prices include GST". */
+    priceNote?: string;
+  };
   services: EngineService[];
   staff: EngineStaff[];
   /** usualStylist: who they've seen most in the last 12 months (only when that stylist is in `staff`). */
@@ -115,7 +119,7 @@ export function buildSystemPrompt(ctx: EngineContext): LlmRequest['system'] {
 How to talk:
 - Reply in the client's language and script (English, Hindi, Hinglish, Kannada, Tamil, Telugu, Malayalam, Marathi, Bengali…). Be warm, brief and natural, like a good receptionist on WhatsApp. One or two short paragraphs at most.
 - WhatsApp formatting only: *bold* sparingly, no markdown headings, no tables. Never show IDs.
-- Prices include GST and are paid at the salon.
+- ${salon.priceNote ?? 'Prices include GST'} and are paid at the salon.
 
 How to book:
 - Only offer services from the menu below. If the client is vague ("haircut"), pick the closest service or ask one short question.

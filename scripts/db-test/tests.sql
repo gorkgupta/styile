@@ -56,8 +56,12 @@ select id as haircut from public.services where salon_id = :'salon_a' and name =
 -- Owner cannot touch platform-managed fields
 select t.fails(format('update public.salons set plan = %L where id = %L', 'pro', :'salon_a'), 'owner cannot change own plan');
 select t.fails(format('update public.profiles set is_platform_admin = true where id = %L', '00000000-0000-0000-0000-00000000000a'), 'user cannot make self platform admin');
-update public.salons set gstin = '29ABCDE1234F1Z5', address = '12 MG Road' where id = :'salon_a';
+select t.ok((select gst_mode from public.salons where id = :'salon_a') = 'unregistered', 'new salon starts as not GST registered');
+select t.fails(format('update public.salons set gst_mode = %L where id = %L', 'regular', :'salon_a'), 'regular GST needs a GSTIN');
+update public.salons set gstin = '29ABCDE1234F1Z5', gst_mode = 'regular', address = '12 MG Road' where id = :'salon_a';
 select t.ok((select gstin from public.salons where id = :'salon_a') = '29ABCDE1234F1Z5', 'owner can edit salon profile');
+select t.ok((select gst_mode from public.salons where id = :'salon_a') = 'regular', 'owner can switch the salon to regular GST');
+select t.fails(format('update public.salons set gstin = null where id = %L', :'salon_a'), 'GSTIN cannot be removed while registered');
 select t.fails(format('update public.salons set timezone = %L where id = %L', 'Mars/Olympus', :'salon_a'), 'salon time zone must be a real zone');
 select t.fails(format('update public.salons set brand_color = %L where id = %L', 'red;}body{display:none', :'salon_a'), 'brand colour must be a hex colour');
 select t.fails(format('update public.profiles set email = %L where id = %L', 'vik@trim.in', '00000000-0000-0000-0000-00000000000a'), 'user cannot change profile email (invite lookup)');
@@ -77,7 +81,7 @@ insert into public.appointments (salon_id, customer_id, staff_id, start_at, end_
   values (:'salon_a', :'rohan', :'priya', '2026-11-02 11:50+05:30', '2026-11-02 12:10+05:30');
 select t.ok(true, 'cancelled slot can be rebooked');
 
--- ===== Billing: GST inclusive pricing =====
+-- ===== Billing: GST inclusive pricing (regular salon, 5% on services since 22 Sep 2025) =====
 select * from public.create_invoice(:'salon_a', jsonb_build_object(
   'customer_id', :'rohan', 'appointment_id', :'appt1',
   'items', jsonb_build_array(
@@ -87,9 +91,15 @@ select * from public.create_invoice(:'salon_a', jsonb_build_object(
 )) \gset inv_
 \echo invoice :inv_invoice_no total :inv_total taxable :inv_taxable_total cgst :inv_cgst sgst :inv_sgst
 select t.ok(:'inv_invoice_no' = 'INV-00001', 'invoice numbered INV-00001');
--- lines: 600 incl -> taxable 508.47 tax 91.53 ; 699-50=649 incl -> taxable 550.00 tax 99.00 ; total 1249
-select t.ok(:inv_total = 1249 and :inv_taxable_total = 1058.47 and :inv_cgst + :inv_sgst = 190.53, 'GST split computed (1249 = 1058.47 + 190.53)');
-select t.ok(:inv_cgst = 95.27 and :inv_sgst = 95.26, 'CGST/SGST halves');
+-- lines: Haircut 600 incl @5% (the 18% sent for a service is ignored) -> taxable 571.43 tax 28.57 ;
+--        Hair serum (custom, 18% sent) 699-50=649 incl -> taxable 550.00 tax 99.00 ; total 1249
+select t.ok(:inv_total = 1249 and :inv_taxable_total = 1121.43 and :inv_cgst + :inv_sgst = 127.57, 'GST split computed (1249 = 1121.43 + 127.57)');
+select t.ok(:inv_cgst = 63.79 and :inv_sgst = 63.78, 'CGST/SGST halves');
+select t.ok((select gst_rate = 5 and taxable = 571.43 and tax = 28.57 and code = '999721' from public.invoice_items where invoice_id = :'inv_id' and sort = 1),
+  'service line taxed at 5% with its SAC even though the app sent 18%');
+select t.ok((select gst_rate = 18 and tax = 99 from public.invoice_items where invoice_id = :'inv_id' and sort = 2), 'custom line keeps the 18% it was given');
+select t.ok(:'inv_bill_type' = 'tax_invoice' and :'inv_gst_mode' = 'regular' and :'inv_seller_gstin' = '29ABCDE1234F1Z5'
+  and :'inv_place_of_supply' = 'Karnataka (29)' and :inv_composition_tax = 0, 'regular salon issues a tax invoice with GSTIN and place of supply');
 select t.ok(:'inv_status' = 'paid', 'split payment marks bill paid');
 select t.ok((select status from public.appointments where id = :'appt1') = 'completed', 'appointment completed by checkout');
 select t.ok((select visit_count = 1 and total_spent = 1249 from public.customers where id = :'rohan'), 'client visit stats updated');
@@ -403,6 +413,100 @@ set role authenticated;
 select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-000000000976","role":"authenticated"}', false);
 select public.claim_customer_profiles() as pema_claimed \gset
 select t.ok(:pema_claimed = 1 and (select name from public.customers) = 'Pema', 'auth phone with a "+" still matches the stored digits');
+
+-- ===== GST modes (0007): Bill / Bill of Supply / Tax Invoice =====
+reset role;
+select t.ok(public.service_gst_rate('2025-09-21') = 18 and public.service_gst_rate('2025-09-22') = 5 and public.service_gst_rate('2026-10-28') = 5,
+  'salon services: 18% until 21 Sep 2025, 5% from 22 Sep 2025');
+select t.ok(public.gst_place_of_supply('West Bengal', null) = 'West Bengal (19)'
+  and public.gst_place_of_supply('Karnataka', '19ABCDE1234F1Z5') = 'West Bengal (19)'
+  and public.gst_place_of_supply(' ', null) is null, 'place of supply: state with its GST code, GSTIN state wins');
+insert into auth.users (id, email) values ('00000000-0000-0000-0000-000000000010', 'tashi@jaigaon.in');
+set role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-000000000010","role":"authenticated"}', false);
+select t.fails('select public.create_salon(''Tashi Salon'', ''tashi-salon'', p_gst_mode => ''regular'')', 'registered salon needs a GSTIN at sign-up');
+select t.fails('select public.create_salon(''Tashi Salon'', ''tashi-salon'', p_gst_mode => ''sometimes'')', 'unknown GST mode rejected');
+select (public.create_salon('Tashi Beauty Parlour', 'tashi-beauty', '919800012345', 'Jaigaon', 'Tashi', true, p_state => 'West Bengal')).id as salon_u \gset
+select (public.create_salon('Dooars Unisex Salon', 'dooars-salon', null, 'Jaigaon', 'Tashi', false, 'composition', '19abcde1234f1z5', 'West Bengal')).id as salon_c \gset
+select t.ok((select gst_mode = 'unregistered' and gstin is null and state = 'West Bengal' from public.salons where id = :'salon_u'), 'default sign-up: not GST registered');
+select t.ok((select gst_mode = 'composition' and gstin = '19ABCDE1234F1Z5' from public.salons where id = :'salon_c'), 'composition salon signs up with its GSTIN (cleaned up)');
+select t.ok((select sac_code from public.services where salon_id = :'salon_u' and name = 'Facial') = '999722'
+  and (select sac_code from public.services where salon_id = :'salon_u' and name = 'Haircut') = '999721', 'starter menu carries SAC codes');
+select t.fails(format('update public.services set gst_rate = 7 where salon_id = %L', :'salon_u'), 'service GST override must be a GST slab');
+select t.fails(format('update public.services set sac_code = %L where salon_id = %L', '998599', :'salon_u'), 'service SAC must be a salon SAC (99972x)');
+select id as u_cut from public.services where salon_id = :'salon_u' and name = 'Haircut' \gset
+select id as u_facial from public.services where salon_id = :'salon_u' and name = 'Facial' \gset
+
+-- Unregistered: a plain bill, no GST anywhere, whatever the app sends
+select * from public.create_invoice(:'salon_u', jsonb_build_object('items', jsonb_build_array(
+  jsonb_build_object('kind','service','service_id',:'u_cut','name','Haircut','qty',1,'unit_price',600,'gst_rate',18),
+  jsonb_build_object('kind','product','name','Hair oil','qty',2,'unit_price',149.50,'gst_rate',5,'code','3305'),
+  jsonb_build_object('kind','custom','name','Threading','qty',1,'unit_price',60)))) \gset u_
+select t.ok(:'u_bill_type' = 'bill' and :'u_gst_mode' = 'unregistered' and :u_cgst = 0 and :u_sgst = 0 and :u_igst = 0
+  and :u_total = 959 and :u_taxable_total = 959 and :u_composition_tax = 0, 'unregistered salon: plain bill, zero tax (959 = 600 + 299 + 60)');
+select t.ok((select seller_gstin is null and place_of_supply is null and client_gstin is null from public.invoices where id = :'u_id'), 'unregistered bill carries no GSTIN or place of supply');
+select t.ok((select bool_and(gst_rate = 0 and tax = 0 and taxable = line_total) from public.invoice_items where invoice_id = :'u_id'), 'every line of an unregistered bill has 0% and no tax');
+select t.ok((select string_agg(code, ',' order by sort) from public.invoice_items where invoice_id = :'u_id') = '999721,3305,999729', 'SAC/HSN kept per line for the record');
+select t.fails(format($q$select public.create_invoice(%L, '{"client_gstin":"19ABCDE1234F1Z5","items":[{"kind":"custom","name":"x","qty":1,"unit_price":100}]}'::jsonb)$q$, :'salon_u'),
+  'client GSTIN refused on a bill that isn''t a tax invoice');
+select t.ok((public.create_invoice(:'salon_u', '{"items":[{"kind":"product","name":"Soap","qty":1,"unit_price":40}]}'::jsonb)).total = 40,
+  'unregistered salon can sell a product without choosing a GST rate');
+
+-- Composition: bill of supply, no tax collected, 6% estimated for the salon
+select * from public.create_invoice(:'salon_c', jsonb_build_object('items', jsonb_build_array(
+  jsonb_build_object('kind','service','name','Facial','qty',1,'unit_price',1200,'gst_rate',18),
+  jsonb_build_object('kind','product','name','Lipstick','qty',1,'unit_price',349,'gst_rate',18,'code','3304')))) \gset c_
+select t.ok(:'c_bill_type' = 'bill_of_supply' and :c_cgst + :c_sgst = 0 and :c_total = 1549 and :c_composition_tax = 92.94,
+  'composition salon: bill of supply, zero tax, composition tax 6% of 1549 = 92.94');
+select t.ok(:'c_seller_gstin' = '19ABCDE1234F1Z5' and (select bool_and(gst_rate = 0 and tax = 0) from public.invoice_items where invoice_id = :'c_id'),
+  'bill of supply shows the GSTIN but no tax on any line');
+
+-- Regular: services at the statutory rate (or their override), products at the rate chosen, client GSTIN
+update public.salons set gst_mode = 'regular', state = 'West Bengal' where id = :'salon_c';
+select t.ok((select gst_mode from public.salons where id = :'salon_c') = 'regular', 'owner can change GST mode (composition to regular)');
+update public.services set gst_rate = 0, sac_code = '999722' where id = :'u_facial';
+update public.salons set gst_mode = 'regular', gstin = '19PQRSX5678K1Z2' where id = :'salon_u';
+select * from public.create_invoice(:'salon_u', jsonb_build_object('client_gstin', '19pqrst1234k1z9', 'client_address', ' Hotel Druk,  Main Road, Jaigaon ',
+  'items', jsonb_build_array(
+    jsonb_build_object('kind','service','service_id',:'u_cut','name','Haircut','qty',1,'unit_price',600,'gst_rate',18,'code','999723'),
+    jsonb_build_object('kind','service','service_id',:'u_facial','name','Facial','qty',1,'unit_price',1800),
+    jsonb_build_object('kind','product','name','Face cream','qty',1,'unit_price',590,'gst_rate',18,'code','33049910'),
+    jsonb_build_object('kind','product','name','Shampoo','qty',1,'unit_price',315,'gst_rate',5,'code','3305')))) \gset r_
+-- 600 @5% incl -> 571.43 + 28.57 ; facial override 0% -> 1800 ; cream 590 @18% -> 500 + 90 ; shampoo 315 @5% -> 300 + 15
+select t.ok(:'r_bill_type' = 'tax_invoice' and :r_total = 3305 and :r_taxable_total = 3171.43 and :r_cgst + :r_sgst = 133.57,
+  'regular: 5% on services, 18% and 5% on products (3305 = 3171.43 + 133.57)');
+select t.ok((select string_agg(gst_rate::int || ':' || code, ',' order by sort) from public.invoice_items where invoice_id = :'r_id') = '5:999721,0:999722,18:33049910,5:3305',
+  'per-line rates and codes: service rate and SAC come from the menu, products keep theirs');
+select t.ok(:'r_client_gstin' = '19PQRST1234K1Z9' and :'r_client_address' = 'Hotel Druk, Main Road, Jaigaon' and :'r_place_of_supply' = 'West Bengal (19)',
+  'client GSTIN and address on the tax invoice; place of supply West Bengal (19)');
+select t.fails(format($q$select public.create_invoice(%L, '{"items":[{"kind":"product","name":"Serum","qty":1,"unit_price":500}]}'::jsonb)$q$, :'salon_u'),
+  'regular: a product needs its GST rate');
+select t.fails(format($q$select public.create_invoice(%L, '{"items":[{"kind":"product","name":"Serum","qty":1,"unit_price":500,"gst_rate":7}]}'::jsonb)$q$, :'salon_u'),
+  'regular: product rate must be a GST slab');
+select t.fails(format($q$select public.create_invoice(%L, '{"items":[{"kind":"product","name":"Serum","qty":1,"unit_price":500,"gst_rate":18,"code":"33A4"}]}'::jsonb)$q$, :'salon_u'),
+  'HSN code must be 4, 6 or 8 digits');
+select t.fails(format($q$select public.create_invoice(%L, '{"client_gstin":"19PQRST1234K1Z","items":[{"kind":"custom","name":"x","qty":1,"unit_price":100}]}'::jsonb)$q$, :'salon_u'),
+  'client GSTIN format checked');
+update public.salons set prices_include_tax = false where id = :'salon_u';
+select * from public.create_invoice(:'salon_u', jsonb_build_object('items', jsonb_build_array(
+  jsonb_build_object('kind','service','service_id',:'u_cut','name','Haircut','qty',1,'unit_price',1000)))) \gset x_
+select t.ok(:x_total = 1050 and :x_cgst = 25 and :x_sgst = 25, 'GST added on top: ₹1,000 service + 5% = ₹1,050');
+update public.salons set prices_include_tax = true where id = :'salon_u';
+select t.fails(format('update public.salons set gst_mode = %L where id = %L', 'turbo', :'salon_u'), 'GST mode must be one of the three');
+
+-- Reports: GST only from tax invoices; composition estimate; this financial year's turnover
+select public.salon_report(:'salon_u', (now() at time zone 'Asia/Kolkata')::date, (now() at time zone 'Asia/Kolkata')::date) as urep \gset
+select t.ok((:'urep'::jsonb ->> 'tax')::numeric = 133.57 + 50 and (:'urep'::jsonb ->> 'composition_tax')::numeric = 0
+  and (:'urep'::jsonb ->> 'fy_turnover')::numeric = 959 + 40 + 3171.43 + 1000, 'report: GST only from tax invoices, turnover before tax for the year');
+select t.ok((:'urep'::jsonb ->> 'fy_from')::date <= (now() at time zone 'Asia/Kolkata')::date
+  and extract(month from (:'urep'::jsonb ->> 'fy_from')::date) = 4 and extract(day from (:'urep'::jsonb ->> 'fy_from')::date) = 1, 'financial year starts on 1 April');
+select public.salon_report(:'salon_c', (now() at time zone 'Asia/Kolkata')::date, (now() at time zone 'Asia/Kolkata')::date) as crep2 \gset
+select t.ok((:'crep2'::jsonb ->> 'tax')::numeric = 0 and (:'crep2'::jsonb ->> 'composition_tax')::numeric = 92.94, 'report: composition tax payable (estimate)');
+reset role;
+-- Old bills keep the mode they were issued under
+select t.ok((select bill_type from public.invoices where id = :'c_id') = 'bill_of_supply', 'switching mode leaves earlier bills unchanged');
+select t.fails(format($q$update public.invoices set bill_type = 'tax_invoice' where id = %L$q$, :'c_id'), 'bill type always matches the bill''s GST mode');
+set role authenticated;
 
 -- ===== Anonymous =====
 reset role;

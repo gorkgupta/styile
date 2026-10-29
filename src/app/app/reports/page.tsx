@@ -7,7 +7,7 @@ import type { SalonReport } from '@/lib/types';
 export const metadata = { title: 'Reports' };
 
 const EMPTY: SalonReport = {
-  revenue: 0, collected: 0, tax: 0, bills: 0, avg_bill: 0, new_clients: 0,
+  revenue: 0, collected: 0, tax: 0, composition_tax: 0, fy_turnover: 0, fy_from: '', bills: 0, avg_bill: 0, new_clients: 0,
   appointments: {}, by_source: {}, by_day: [], by_staff: [], by_service: [], by_method: {},
   coins_sold: 0, coins_bonus: 0, coins_redeemed: 0, coins_outstanding: 0,
 };
@@ -32,6 +32,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       range={range}
       today={today}
       salonName={ctx.salon.name}
+      gstMode={ctx.salon.gst_mode}
     />
   );
 }

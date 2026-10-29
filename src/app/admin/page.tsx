@@ -33,8 +33,8 @@ export default async function Page() {
   const db = createAdminClient();
   const since = new Date(Date.now() - 30 * 86400000).toISOString();
   const [salons, owners, staff, appts, hasMembership] = await Promise.all([
-    readAll<Pick<Salon, 'id' | 'name' | 'slug' | 'city' | 'plan' | 'plan_status' | 'trial_ends_at' | 'wa_phone_number_id' | 'wa_business_account_id' | 'wa_display_number' | 'booking_enabled' | 'created_at'>>(
-      (a, b) => db.from('salons').select('id, name, slug, city, plan, plan_status, trial_ends_at, wa_phone_number_id, wa_business_account_id, wa_display_number, booking_enabled, created_at').order('created_at', { ascending: false }).range(a, b)),
+    readAll<Pick<Salon, 'id' | 'name' | 'slug' | 'city' | 'plan' | 'plan_status' | 'trial_ends_at' | 'wa_phone_number_id' | 'wa_business_account_id' | 'wa_display_number' | 'booking_enabled' | 'gst_mode' | 'gstin' | 'created_at'>>(
+      (a, b) => db.from('salons').select('id, name, slug, city, plan, plan_status, trial_ends_at, wa_phone_number_id, wa_business_account_id, wa_display_number, booking_enabled, gst_mode, gstin, created_at').order('created_at', { ascending: false }).range(a, b)),
     readOwners(),
     readAll<{ salon_id: string }>((a, b) => db.from('staff').select('salon_id').eq('active', true).range(a, b)),
     readAll<{ salon_id: string; source: string }>((a, b) => db.from('appointments').select('salon_id, source').gte('created_at', since).neq('status', 'waiting').range(a, b)),
@@ -71,7 +71,7 @@ export default async function Page() {
     staffCount: staffCount.get(s.id) ?? 0,
     bookings30d: bookings.get(s.id)?.total ?? 0, whatsapp30d: bookings.get(s.id)?.whatsapp ?? 0,
     wa: s.wa_phone_number_id ? { phoneNumberId: s.wa_phone_number_id, businessAccountId: s.wa_business_account_id ?? '', displayNumber: s.wa_display_number ?? '' } : null,
-    bookingEnabled: s.booking_enabled, createdAt: s.created_at,
+    bookingEnabled: s.booking_enabled, createdAt: s.created_at, gstMode: s.gst_mode ?? 'unregistered', gstin: s.gstin ?? null,
   }));
 
   return <AdminConsole salons={rows} nowIso={new Date().toISOString()} adminName={profile.full_name || profile.email || 'Admin'} hasSalon={(hasMembership.count ?? 0) > 0} />;

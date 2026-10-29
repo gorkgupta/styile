@@ -10,28 +10,35 @@ import type { Hours } from '../src/lib/types';
 const TZ = 'Asia/Kolkata';
 
 test('GST-inclusive bill matches the database (same case as scripts/db-test)', () => {
+  // Regular salon after 22 Sep 2025: the haircut is a service at 5% (the DB ignores the 18% the app sends for a
+  // service line, so the POS passes the menu's override: null); the custom serum line keeps its 18%.
   const b = computeBill(
     [
-      { name: 'Haircut', qty: 1, unitPrice: 600, gstRate: 18 },
-      { name: 'Hair serum', qty: 2, unitPrice: 349.5, discount: 50, gstRate: 18 },
+      { kind: 'service', name: 'Haircut', qty: 1, unitPrice: 600, gstRate: null },
+      { kind: 'custom', name: 'Hair serum', qty: 2, unitPrice: 349.5, discount: 50, gstRate: 18 },
     ],
-    { pricesIncludeTax: true, defaultGstRate: 18 },
+    { gstMode: 'regular', pricesIncludeTax: true, serviceRate: 5 },
   );
   assert.equal(b.total, 1249);
-  assert.equal(b.taxableTotal, 1058.47);
-  assert.equal(b.cgst, 95.27);
-  assert.equal(b.sgst, 95.26);
+  assert.equal(b.taxableTotal, 1121.43);
+  assert.equal(b.taxTotal, 127.57);
+  assert.equal(b.cgst, 63.79);
+  assert.equal(b.sgst, 63.78);
+  assert.deepEqual(b.lines.map((l) => [l.gstRate, l.taxable, l.tax]), [[5, 571.43, 28.57], [18, 550, 99]]);
   assert.equal(b.subtotal, 1299);
   assert.equal(b.discountTotal, 50);
   assert.equal(b.roundOff, 0);
+  assert.equal(b.compositionTax, 0);
 });
 
 test('GST-exclusive bill adds tax and rounds to the rupee', () => {
-  const b = computeBill([{ name: 'Facial', qty: 1, unitPrice: 999 }], { pricesIncludeTax: false, defaultGstRate: 18 });
+  const b = computeBill([{ name: 'Facial', qty: 1, unitPrice: 999 }], { gstMode: 'regular', pricesIncludeTax: false, serviceRate: 5 });
   assert.equal(b.taxableTotal, 999);
-  assert.equal(b.taxTotal, 179.82);
-  assert.equal(b.total, 1179);
-  assert.equal(b.roundOff, 0.18);
+  assert.equal(b.taxTotal, 49.95);
+  assert.equal(b.total, 1049);
+  assert.equal(b.roundOff, 0.05);
+  const db = computeBill([{ kind: 'service', name: 'Haircut', qty: 1, unitPrice: 1000 }], { gstMode: 'regular', pricesIncludeTax: false, serviceRate: 5 });
+  assert.deepEqual([db.total, db.cgst, db.sgst], [1050, 25, 25], 'same as the DB test: ₹1,000 + 5%');
 });
 
 test('amount in words uses lakh/crore', () => {

@@ -1,13 +1,20 @@
 'use client';
 import { useActionState, useEffect, useState, type ReactNode } from 'react';
 import Link from 'next/link';
-import { Notice, SubmitButton, TextField } from '@/components/ui/ui';
+import { Notice, SelectField, SubmitButton, TextField } from '@/components/ui/ui';
 import { Icon, type IconName } from '@/components/ui/icons';
 import { PhoneInput } from '@/components/ui/phone-input';
 import { createSalon, signIn, signUp } from '@/actions/auth';
 import type { ActionResult } from '@/lib/types';
 import { TRIAL_DAYS } from '@/lib/plans';
 import { isReservedSlug, rootDomain } from '@/lib/tenant';
+import { DEFAULT_STATE, INDIAN_STATES, type GstMode } from '@/lib/gst';
+
+const GST_OPTIONS: { mode: GstMode; title: string; body: string }[] = [
+  { mode: 'unregistered', title: 'Not registered', body: 'No GSTIN. Bills show no GST — most parlours under ₹20 lakh a year.' },
+  { mode: 'composition', title: 'Composition scheme', body: 'You pay 6% yourself. Bills say “Bill of Supply”, no GST to clients.' },
+  { mode: 'regular', title: 'Regular GST', body: 'Tax invoices with 5% GST on services, CGST + SGST.' },
+];
 
 /** Calm split layout for staff sign-in screens: form on the left, a short reassurance panel on the right (hidden on phones). */
 export function AuthLayout({ children, aside }: { children: ReactNode; aside: ReactNode }) {
@@ -117,6 +124,7 @@ export function OnboardingForm({ ownerName, appHost }: { ownerName: string; appH
   const [slugEdited, setSlugEdited] = useState(false);
   const [host, setHost] = useState(appHost);
   useEffect(() => { if (!appHost && typeof window !== 'undefined') setHost(window.location.host); }, [appHost]);
+  const [gstMode, setGstMode] = useState<GstMode>('unregistered');
   const shownSlug = slugEdited ? slug : slugify(name);
   const root = rootDomain();
 
@@ -156,8 +164,25 @@ export function OnboardingForm({ ownerName, appHost }: { ownerName: string; appH
         </div>
         <div className="grid-2">
           <PhoneInput id="ob-phone" name="phone" label="Salon mobile number" />
-          <TextField label="City" name="city" placeholder="Bengaluru" autoComplete="address-level2" />
+          <TextField label="City" name="city" placeholder="Jaigaon" autoComplete="address-level2" />
         </div>
+        <SelectField label="State" name="state" defaultValue={DEFAULT_STATE}>
+          {INDIAN_STATES.map((s) => <option key={s.code} value={s.name}>{s.name}</option>)}
+        </SelectField>
+        <fieldset className="choice-cards is-stacked">
+          <legend className="label">Are you GST registered?</legend>
+          {GST_OPTIONS.map((o) => (
+            <label key={o.mode} className={`choice-card${gstMode === o.mode ? ' is-on' : ''}`}>
+              <input type="radio" name="gst_mode" value={o.mode} checked={gstMode === o.mode} onChange={() => setGstMode(o.mode)} />
+              <span className="choice-body"><span className="strong">{o.title}</span><span className="small ink2">{o.body}</span></span>
+            </label>
+          ))}
+        </fieldset>
+        {gstMode !== 'unregistered' && (
+          <TextField label="GSTIN" name="gstin" required maxLength={15} placeholder="19ABCDE1234F1Z5" className="mono-upper" autoComplete="off"
+            hint="15 characters, from your GST certificate. Printed on every bill." />
+        )}
+        <p className="tiny muted">Not sure? Choose “Not registered” and check with your CA — you can change it in Settings.</p>
         <TextField label="Your name" name="owner_name" defaultValue={ownerName} hint="Shown on the calendar as the first stylist. You can rename it later." />
         <label className="check onb-seed">
           <input type="checkbox" name="seed" value="on" defaultChecked />

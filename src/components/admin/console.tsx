@@ -9,7 +9,8 @@ import { connectWhatsApp, disconnectWhatsApp, setSalonPlan } from '@/actions/adm
 import { money } from '@/lib/billing';
 import { PLAN_LABEL, PLAN_STATUS_LABEL, PLANS, monthlyRevenue, planById } from '@/lib/plans';
 import { fmtDateShort, localDate } from '@/lib/time';
-import type { Salon } from '@/lib/types';
+import { GST_MODE_LABEL } from '@/lib/gst';
+import type { GstMode, Salon } from '@/lib/types';
 
 const TZ = 'Asia/Kolkata';
 
@@ -20,6 +21,8 @@ export interface AdminSalonRow {
   staffCount: number; bookings30d: number; whatsapp30d: number;
   wa: { phoneNumberId: string; businessAccountId: string; displayNumber: string } | null;
   bookingEnabled: boolean; createdAt: string;
+  /** Set by the salon owner: which bill they issue (Bill / Bill of Supply / Tax Invoice). */
+  gstMode: GstMode; gstin: string | null;
 }
 
 export interface AdminConsoleProps { salons: AdminSalonRow[]; nowIso: string; adminName: string; hasSalon: boolean }
@@ -27,6 +30,7 @@ export interface AdminConsoleProps { salons: AdminSalonRow[]; nowIso: string; ad
 type Tone = 'neutral' | 'peacock' | 'marigold' | 'success' | 'danger' | 'plum' | 'outline';
 const STATUS_TONE: Record<Salon['plan_status'], Tone> = { trialing: 'marigold', active: 'success', past_due: 'danger', suspended: 'danger', cancelled: 'neutral' };
 const PLAN_TONE: Record<Salon['plan'], Tone> = { trial: 'outline', starter: 'neutral', growth: 'peacock', pro: 'plum' };
+const GST_TONE: Record<GstMode, Tone> = { unregistered: 'outline', composition: 'marigold', regular: 'peacock' };
 
 type Filter = 'all' | 'trialing' | 'active' | 'attention';
 
@@ -111,7 +115,7 @@ export function AdminConsole(p: AdminConsoleProps) {
               <table className="table adm-table">
                 <thead>
                   <tr>
-                    <th>Salon</th><th>Owner</th><th>Plan</th><th className="right">Staff</th><th className="right">Bookings (30 days)</th><th>WhatsApp</th><th>Joined</th>
+                    <th>Salon</th><th>Owner</th><th>Plan</th><th>GST</th><th className="right">Staff</th><th className="right">Bookings (30 days)</th><th>WhatsApp</th><th>Joined</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -140,6 +144,7 @@ export function AdminConsole(p: AdminConsoleProps) {
                             </div>
                           )}
                         </td>
+                        <td><Badge tone={GST_TONE[s.gstMode]}>{GST_MODE_LABEL[s.gstMode]}</Badge></td>
                         <td className="right num">{s.staffCount}</td>
                         <td className="right">
                           <div className="num strong">{s.bookings30d}</div>
@@ -229,6 +234,11 @@ function SalonSheet({ salon, nowIso, onClose }: { salon: AdminSalonRow | null; n
             <div><span className="tiny muted">From WhatsApp</span><span className="strong num">{salon.whatsapp30d}</span></div>
             <div><span className="tiny muted">Joined</span><span className="strong">{fmtDateShort(localDate(new Date(salon.createdAt), TZ))}</span></div>
           </div>
+          <p className="small ink2">
+            <span className="muted">GST: </span><span className="strong">{GST_MODE_LABEL[salon.gstMode]}</span>
+            {salon.gstMode !== 'unregistered' && salon.gstin ? <> · <span className="mono">{salon.gstin}</span></> : null}
+            <span className="muted"> · set by the salon owner in Settings</span>
+          </p>
           <div className="row-wrap">
             <a className="btn btn-secondary btn-sm" href={rootDomain() ? salonUrl(salon.slug) : `/s/${salon.slug}`} target="_blank" rel="noreferrer"><Icon name="external" size={16} />Open salon site</a>
             {!salon.bookingEnabled && <Badge tone="marigold">Online booking switched off by salon</Badge>}

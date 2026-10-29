@@ -64,7 +64,7 @@ async function handleMessage(phoneNumberId: string, profileName: string | null, 
   if (m.type === 'reaction' || m.type === 'system' || m.type === 'unsupported') return;
   const db = createAdminClient();
   const { data: salon } = await db.from('salons')
-    .select('id, name, slug, phone, address, timezone, plan_status, wa_bot_enabled, wa_bot_instructions, booking_window_days')
+    .select('id, name, slug, phone, address, timezone, plan_status, wa_bot_enabled, wa_bot_instructions, booking_window_days, gst_mode, prices_include_tax')
     .eq('wa_phone_number_id', phoneNumberId).maybeSingle();
   if (!salon || ['suspended', 'cancelled'].includes(salon.plan_status)) return;
 
@@ -117,6 +117,9 @@ async function handleMessage(phoneNumberId: string, profileName: string | null, 
       salon: {
         name: salon.name, address: salon.address, phone: salon.phone, tz: salon.timezone, hours: catalog.branch.business_hours,
         instructions: salon.wa_bot_instructions, windowDays: salon.booking_window_days, bookingUrl: salonUrl(salon.slug) || `${env.appUrl()}/s/${salon.slug}`,
+        priceNote: salon.gst_mode === 'regular'
+          ? (salon.prices_include_tax ? 'Prices include GST' : 'GST (5% on services) is added to these prices on the bill')
+          : 'Prices are final, with no GST added',
       },
       services: catalog.services.map((s) => ({
         id: s.id, name: s.name, category: s.category_id ? catMap.get(s.category_id) ?? null : null,

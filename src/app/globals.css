@@ -827,6 +827,39 @@ img, svg { display: block; }
   .invoice-watermark { opacity: .18; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
 
+/* GST: bill types, product rates, client GSTIN */
+.invoice-declaration { margin: -8px 0 0; padding: 8px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); font-size: 13px; font-weight: 600; color: var(--ink-2); text-align: center; }
+.invoice-gst-summary { border-collapse: collapse; font-size: 12.5px; min-width: 260px; }
+.invoice-gst-summary th { font-size: 11px; font-weight: 600; color: var(--muted); text-align: left; padding: 2px 10px 4px 0; border-bottom: 1px solid var(--line); }
+.invoice-gst-summary td { padding: 3px 10px 3px 0; }
+.invoice-gst-summary .right { text-align: right; }
+.pt-bill-kind { text-transform: uppercase; letter-spacing: .1em; font-weight: 700; color: var(--peacock); }
+.pos-tax-types { display: flex; flex-wrap: wrap; gap: 6px; }
+.pos-hsn { gap: 10px; }
+.pos-hsn .input { width: 150px; flex: none; }
+.pos-line-tax { flex-basis: 190px !important; }
+.pos-b2b { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line-strong); }
+.pos-b2b-link { margin-top: 10px; }
+.choice-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; border: 0; margin: 0; padding: 0; min-width: 0; }
+.choice-cards > legend { padding: 0 0 6px; }
+.choice-cards.is-stacked { grid-template-columns: 1fr; gap: 8px; }
+.choice-card { display: flex; gap: 10px; align-items: stretch; padding: 12px 14px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface); cursor: pointer; transition: border-color .12s, background .12s; }
+.choice-card:hover { border-color: var(--peacock-100); }
+.choice-card.is-on { border-color: var(--peacock); background: var(--peacock-50); box-shadow: inset 0 0 0 1px var(--peacock); }
+.choice-card:focus-within { box-shadow: var(--focus); }
+.choice-card.is-on:focus-within { box-shadow: inset 0 0 0 1px var(--peacock), var(--focus); }
+.choice-card input { width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--peacock); flex: none; align-self: flex-start; }
+.choice-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.choice-tag { margin-top: auto; padding-top: 4px; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--peacock); }
+.settings-static { display: flex; flex-direction: column; gap: 2px; padding-top: 8px; }
+.meter { height: 6px; border-radius: 999px; background: var(--line); overflow: hidden; margin-top: 8px; }
+.meter > span { display: block; height: 100%; border-radius: inherit; background: var(--peacock); }
+.gst-meter .stat-value { white-space: nowrap; }
+.gst-meter-of { font-size: 14px; font-weight: 500; color: var(--muted); letter-spacing: 0; }
+.gst-meter.is-warn .meter > span { background: var(--marigold); }
+.gst-meter.is-danger .meter > span { background: var(--danger); }
+@media (max-width: 860px) { .choice-cards { grid-template-columns: 1fr; } }
+
 /* manage screens ---------------------------------------------------------- */
 .link-btn { border: 0; background: none; padding: 0; color: var(--peacock); font-weight: 550; cursor: pointer; }
 .link-btn:hover { text-decoration: underline; text-underline-offset: 3px; }

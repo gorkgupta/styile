@@ -22,7 +22,7 @@ The same rules are enforced twice: in the interface (`src/lib/permissions.ts`) a
 * **Today** — revenue, appointments, queue, chair status, setup checklist.
 * **Calendar** — stylist columns, colour-coded blocks, click a gap to book, move/cancel/no-show, live updates when WhatsApp bookings arrive; double booking is impossible (database exclusion constraint).
 * **Walk-ins** — token numbers, waiting times, start with whoever is free.
-* **Billing** — GST invoices (inclusive or exclusive pricing, CGST/SGST, round-off, amount in words, SAC 999721), split payments (cash/UPI/card), partial payments, cancellation with reason, bill on WhatsApp.
+* **Billing** — the right bill for each salon's GST status: a plain *Bill* (not registered, no GST), a *Bill of Supply* (composition scheme, with the declaration and a 6% estimate in reports) or a *Tax Invoice* (regular: 5% on services since 22 Sep 2025, per-product rates and HSN, SAC per service, CGST/SGST, place of supply, client GSTIN). Inclusive or exclusive pricing, round-off, amount in words, split payments (cash/UPI/card), partial payments, cancellation with reason, bill on WhatsApp. Confirm the GST setup with your CA.
 * **Clients** — history, notes (colour formulas, allergies), tags, visit and spend stats.
 * **Services, team, settings** — menu with durations and GST rates, staff hours/skills/commission, team logins and roles, opening hours, online booking rules.
 * **Reports** — revenue by day, stylist commissions, top services, payment mix, booking sources.

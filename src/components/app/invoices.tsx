@@ -10,10 +10,13 @@ import { money } from '@/lib/billing';
 import { formatPhone } from '@/lib/phone';
 import { describeRange, RANGE_LABEL, type DateRange, type RangeKey } from '@/lib/periods';
 import { fmtDateShort, fmtTime, localDate } from '@/lib/time';
-import type { InvoiceStatus, PayMethod } from '@/lib/types';
+import { COMPOSITION_RATE } from '@/lib/gst';
+import type { GstMode, InvoiceStatus, PayMethod } from '@/lib/types';
 
 export interface InvoiceListRow {
   id: string; invoice_no: string; created_at: string; total: number; paid_total: number; tax: number; status: InvoiceStatus;
+  /** Composition salons: estimated 6% the salon pays on this bill. */
+  composition_tax?: number;
   customer: { id: string; name: string; phone: string } | null; methods: PayMethod[];
 }
 
@@ -28,11 +31,13 @@ export interface InvoicesProps {
   truncated?: boolean;
   initialStatus?: string;
   initialQuery?: string;
+  /** Which tax tile to show: GST (regular), composition estimate, or none. */
+  gstMode?: GstMode;
 }
 
 const PRESETS: RangeKey[] = ['today', 'yesterday', 'week', 'month', 'custom'];
 
-export function InvoicesScreen({ rows, range, today, tz, truncated, initialStatus, initialQuery }: InvoicesProps) {
+export function InvoicesScreen({ rows, range, today, tz, truncated, initialStatus, initialQuery, gstMode = 'regular' }: InvoicesProps) {
   const router = useRouter();
   const [status, setStatus] = useState<StatusFilter>(['paid', 'due', 'void'].includes(initialStatus ?? '') ? initialStatus as StatusFilter : 'all');
   const [q, setQ] = useState(initialQuery ?? '');
@@ -48,6 +53,7 @@ export function InvoicesScreen({ rows, range, today, tz, truncated, initialStatu
       collected: live.reduce((s, r) => s + r.paid_total, 0),
       due: live.reduce((s, r) => s + Math.max(r.total - r.paid_total, 0), 0),
       gst: live.reduce((s, r) => s + r.tax, 0),
+      composition: live.reduce((s, r) => s + (r.composition_tax ?? 0), 0),
       cancelled: rows.length - live.length,
     };
   }, [rows]);
@@ -114,7 +120,9 @@ export function InvoicesScreen({ rows, range, today, tz, truncated, initialStatu
           <Stat label={singleDay ? 'Bills' : 'Bills in period'} value={totals.count} sub={totals.cancelled ? `${totals.cancelled} cancelled` : 'None cancelled'} />
           <Stat label="Billed" value={money(Math.round(totals.total))} sub={totals.count ? `Average ${money(Math.round(totals.total / totals.count))}` : '—'} />
           <Stat label="Collected" value={money(Math.round(totals.collected))} sub={totals.due > 0 ? <span className="warn-text strong">{money(Math.round(totals.due))} still due</span> : 'Nothing pending'} />
-          <Stat label="GST" value={money(Math.round(totals.gst))} sub="CGST + SGST" />
+          {gstMode === 'regular' ? <Stat label="GST" value={money(Math.round(totals.gst))} sub="CGST + SGST" />
+            : gstMode === 'composition' ? <Stat label="Composition tax (est.)" value={money(Math.round(totals.composition))} sub={`${COMPOSITION_RATE}% · payable by you`} />
+            : <Stat label="GST" value="None" sub="Not registered · no GST charged" />}
         </div>
 
         <Panel flush title={

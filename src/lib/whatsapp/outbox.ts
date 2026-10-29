@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { env } from '@/lib/env';
 import { salonUrl } from '@/lib/tenant';
 import { money } from '@/lib/billing';
+import { billDocument, type BillType } from '@/lib/gst';
 import { fmtCoins } from '@/lib/coins';
 import { fmtDateShort, fmtTime, localDate } from '@/lib/time';
 import { sendWhatsApp, WhatsAppError, type OutgoingMessage } from './cloud-api';
@@ -138,15 +139,19 @@ export async function sendReminder(appointmentId: string) {
 export async function notifyInvoice(invoiceId: string) {
   const db = createAdminClient();
   const { data } = await db.from('invoices')
-    .select('id, salon_id, invoice_no, total, customer:customers(id, name, phone), salon:salons(name, slug)')
+    .select('id, salon_id, invoice_no, total, bill_type, customer:customers(id, name, phone), salon:salons(name, slug)')
     .eq('id', invoiceId).single();
-  const inv = data as unknown as { id: string; salon_id: string; invoice_no: string; total: number; customer: { id: string; name: string; phone: string } | null; salon: { name: string; slug: string } } | null;
+  const inv = data as unknown as {
+    id: string; salon_id: string; invoice_no: string; total: number; bill_type: BillType | null;
+    customer: { id: string; name: string; phone: string } | null; salon: { name: string; slug: string };
+  } | null;
   if (!inv) return { sent: false, reason: 'Bill not found' };
   if (!inv.customer) return { sent: false, reason: 'This bill has no client' };
   const link = salonUrl(inv.salon.slug, `/me/bills/${inv.id}`);
   const first = inv.customer.name.split(' ')[0];
   return notifyCustomer(inv.salon_id, inv.customer.phone, inv.customer.id,
-    `Thank you for visiting ${inv.salon.name}, ${first}! Your bill ${inv.invoice_no} for ${money(inv.total)}: ${link}`,
+    // "Your tax invoice GS-01043" / "Your bill of supply …" / "Your bill …" — the approved template keeps its fixed wording.
+    `Thank you for visiting ${inv.salon.name}, ${first}! Your ${billDocument(inv.bill_type).noun} ${inv.invoice_no} for ${money(inv.total)}: ${link}`,
     { type: 'template', name: TEMPLATES.receipt, bodyParams: [first, inv.salon.name, inv.invoice_no, money(inv.total)], buttonUrlParam: inv.id });
 }
 

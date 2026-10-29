@@ -1,5 +1,7 @@
 // Row types mirroring supabase/migrations. Keep in sync when the schema changes
 // (or regenerate with `npx supabase gen types typescript`).
+import type { BillType, GstMode } from './gst';
+export type { BillType, GstMode } from './gst';
 
 export type MemberRole = 'owner' | 'manager' | 'receptionist' | 'stylist';
 export type ApptStatus = 'waiting' | 'booked' | 'confirmed' | 'checked_in' | 'in_service' | 'completed' | 'cancelled' | 'no_show';
@@ -12,7 +14,11 @@ export interface Salon {
   id: string; name: string; slug: string; legal_name: string | null; gstin: string | null;
   phone: string | null; email: string | null; address: string | null; city: string | null; state: string | null; pincode: string | null;
   timezone: string; currency: string; brand_color: string; logo_url: string | null;
-  prices_include_tax: boolean; default_gst_rate: number; invoice_prefix: string; next_invoice_no: number;
+  prices_include_tax: boolean; invoice_prefix: string; next_invoice_no: number;
+  /** Which bill the salon issues (0007): Bill / Bill of Supply / Tax Invoice. A GSTIN is required unless unregistered. */
+  gst_mode: GstMode;
+  /** Unused since 0007 — services follow the statutory rate, products carry their own. */
+  default_gst_rate: number;
   booking_enabled: boolean; slot_interval_min: number; booking_lead_min: number; booking_window_days: number;
   plan: 'trial' | 'starter' | 'growth' | 'pro'; plan_status: 'trialing' | 'active' | 'past_due' | 'suspended' | 'cancelled';
   trial_ends_at: string | null;
@@ -40,7 +46,12 @@ export interface ServiceCategory { id: string; salon_id: string; name: string; s
 
 export interface Service {
   id: string; salon_id: string; category_id: string | null; name: string; description: string | null;
-  duration_min: number; price: number; gst_rate: number | null; gender: 'unisex' | 'female' | 'male';
+  duration_min: number; price: number;
+  /** null = the statutory rate for salon services on the bill date (5% from 22 Sep 2025). */
+  gst_rate: number | null;
+  /** SAC: 999721 hair, 999722 cosmetic treatments, 999723 spa & massage, 999729 other beauty. */
+  sac_code: string;
+  gender: 'unisex' | 'female' | 'male';
   online_bookable: boolean; active: boolean; sort: number;
 }
 
@@ -71,11 +82,18 @@ export interface Invoice {
   prices_include_tax: boolean; subtotal: number; discount_total: number; taxable_total: number;
   cgst: number; sgst: number; igst: number; round_off: number; total: number; paid_total: number;
   status: InvoiceStatus; notes: string | null; void_reason: string | null; created_at: string;
+  /** Snapshot of how the bill was issued (0007). */
+  gst_mode: GstMode; bill_type: BillType; seller_gstin: string | null; place_of_supply: string | null;
+  client_gstin: string | null; client_address: string | null;
+  /** Composition salons: the 6% they pay themselves on this bill (estimate). */
+  composition_tax: number;
 }
 
 export interface InvoiceItem {
   id: string; invoice_id: string; kind: 'service' | 'product' | 'custom'; service_id: string | null; staff_id: string | null;
   name: string; qty: number; unit_price: number; discount: number; gst_rate: number; taxable: number; tax: number; line_total: number;
+  /** SAC (services) or HSN (products). */
+  code: string | null;
 }
 
 export interface Payment { id: string; invoice_id: string; method: PayMethod; amount: number; reference: string | null; created_at: string }
@@ -103,7 +121,14 @@ export interface WaMessage {
 }
 
 export interface SalonReport {
-  revenue: number; collected: number; tax: number; bills: number; avg_bill: number; new_clients: number;
+  revenue: number; collected: number; bills: number; avg_bill: number; new_clients: number;
+  /** GST on tax invoices in the range (unregistered and composition bills carry none). */
+  tax: number;
+  /** Composition salons: 6% of turnover they owe themselves, estimated per bill. */
+  composition_tax: number;
+  /** Turnover before tax this financial year (1 April to today), for the ₹20 lakh registration threshold. */
+  fy_turnover: number;
+  fy_from: string;
   appointments: Partial<Record<ApptStatus, number>>;
   by_source: Partial<Record<BookingSource, number>>;
   by_day: { day: string; revenue: number; bills: number }[];

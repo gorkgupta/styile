@@ -7,7 +7,8 @@ import { Icon } from '@/components/ui/icons';
 import { Topbar } from './shell';
 import { InvoiceStatusBadge, METHOD_ICON, PAY_METHODS, REF_PLACEHOLDER, parseAmount } from './billing-bits';
 import { addPayment, resendInvoice, voidInvoice } from '@/actions/billing';
-import { amountInWords, money, money2 } from '@/lib/billing';
+import { amountInWords, money, money2, taxByRate } from '@/lib/billing';
+import { billDocument, placeOfSupply as placeOf } from '@/lib/gst';
 import { coinsText, usableCoins } from '@/lib/coins';
 import { formatPhone } from '@/lib/phone';
 import { fmtDateYear } from '@/lib/periods';
@@ -15,17 +16,8 @@ import { fmtTime } from '@/lib/time';
 import type { Invoice, InvoiceItem, PayMethod, Payment } from '@/lib/types';
 import { METHOD_LABEL } from '@/lib/types';
 
-/** SAC for hairdressing, barbers' and beauty services (GST). */
+/** SAC printed on bills issued before per-line codes were stored (0007). */
 const SALON_SAC = '999721';
-
-const STATE_CODES: Record<string, string> = {
-  '01': 'Jammu & Kashmir', '02': 'Himachal Pradesh', '03': 'Punjab', '04': 'Chandigarh', '05': 'Uttarakhand', '06': 'Haryana', '07': 'Delhi',
-  '08': 'Rajasthan', '09': 'Uttar Pradesh', '10': 'Bihar', '11': 'Sikkim', '12': 'Arunachal Pradesh', '13': 'Nagaland', '14': 'Manipur',
-  '15': 'Mizoram', '16': 'Tripura', '17': 'Meghalaya', '18': 'Assam', '19': 'West Bengal', '20': 'Jharkhand', '21': 'Odisha',
-  '22': 'Chhattisgarh', '23': 'Madhya Pradesh', '24': 'Gujarat', '26': 'Dadra & Nagar Haveli and Daman & Diu', '27': 'Maharashtra',
-  '29': 'Karnataka', '30': 'Goa', '31': 'Lakshadweep', '32': 'Kerala', '33': 'Tamil Nadu', '34': 'Puducherry', '35': 'Andaman & Nicobar',
-  '36': 'Telangana', '37': 'Andhra Pradesh', '38': 'Ladakh',
-};
 
 export interface InvoiceDetailProps {
   invoice: Invoice;
@@ -57,10 +49,12 @@ export function InvoiceDetail({ invoice: inv, items, payments, customer, salon, 
   const paidTotal = Number(inv.paid_total);
   const due = Math.max(Math.round((total - paidTotal) * 100) / 100, 0);
   const isVoid = inv.status === 'void';
-  const rates = [...new Set(items.map((i) => Number(i.gst_rate)))];
-  const half = rates.length === 1 ? ` @ ${rates[0] / 2}%` : '';
-  const stateCode = salon.gstin?.slice(0, 2) ?? '';
-  const placeOfSupply = salon.state || STATE_CODES[stateCode] || '';
+  // The bill prints as it was issued: its own type, GSTIN and place of supply, whatever the salon's settings are now.
+  const doc = billDocument(inv.bill_type ?? (Number(inv.cgst) + Number(inv.sgst) + Number(inv.igst) > 0 ? 'tax_invoice' : 'bill'));
+  const gstin = doc.showGstin ? inv.seller_gstin ?? salon.gstin : null;
+  const placeOfSupply = doc.showTax ? inv.place_of_supply ?? placeOf(salon.state, salon.gstin) : null;
+  const rateSummary = doc.showTax ? taxByRate(items) : [];
+  const half = rateSummary.length === 1 ? ` @ ${rateSummary[0].rate / 2}%` : '';
   const addressLines = [salon.address, [salon.city, salon.state].filter(Boolean).join(', ') + (salon.pincode ? ` – ${salon.pincode}` : '')].filter((x) => x && x.trim());
   const totalQty = items.reduce((s, i) => s + Number(i.qty), 0);
 
@@ -112,9 +106,9 @@ export function InvoiceDetail({ invoice: inv, items, payments, customer, salon, 
           {canVoid && !isVoid && <Button variant="ghost" className="invoice-void-btn" icon="trash" onClick={() => { setError(null); setReason(''); setVoidOpen(true); }}>Cancel bill</Button>}
         </div>
         {isVoid && <div className="no-print"><Notice tone="error">This bill was cancelled{inv.void_reason ? `: ${inv.void_reason}` : ''}. Its number stays used and it is left out of your sales and GST totals.</Notice></div>}
-        {!isVoid && !salon.gstin && <div className="no-print"><Notice tone="warn">Add your GSTIN in <Link href="/app/settings">Settings</Link> so it prints on your tax invoices.</Notice></div>}
+        {!isVoid && doc.showGstin && !gstin && <div className="no-print"><Notice tone="warn">Add your GSTIN in <Link href="/app/settings#billing">Settings</Link> so it prints on your bills.</Notice></div>}
 
-        <article className={`invoice-doc${isVoid ? ' is-cancelled' : ''}`} aria-label={`Tax invoice ${inv.invoice_no}`}>
+        <article className={`invoice-doc${isVoid ? ' is-cancelled' : ''}`} aria-label={`${doc.title} ${inv.invoice_no}`}>
           {isVoid && <div className="invoice-watermark" aria-hidden>CANCELLED</div>}
           <header className="invoice-head">
             <div className="invoice-seller">
@@ -124,18 +118,19 @@ export function InvoiceDetail({ invoice: inv, items, payments, customer, salon, 
               <div className="small ink2">
                 {[salon.phone ? `Ph: ${formatPhone(salon.phone)}` : '', salon.email ?? ''].filter(Boolean).join(' · ')}
               </div>
-              {salon.gstin && <div className="small"><span className="muted">GSTIN </span><span className="strong mono">{salon.gstin}</span></div>}
+              {gstin && <div className="small"><span className="muted">GSTIN </span><span className="strong mono">{gstin}</span></div>}
             </div>
             <div className="invoice-title">
-              <div className="invoice-kind">{isVoid ? 'Tax Invoice — Cancelled' : 'Tax Invoice'}</div>
+              <div className="invoice-kind">{isVoid ? `${doc.title} — Cancelled` : doc.title}</div>
               <dl className="invoice-meta">
                 <dt>Bill no.</dt><dd className="strong num">{inv.invoice_no}</dd>
                 <dt>Date</dt><dd className="num">{fmtDateYear(inv.created_at, tz)}</dd>
                 <dt>Time</dt><dd className="num">{fmtTime(inv.created_at, tz)}</dd>
-                {placeOfSupply && <><dt>Place of supply</dt><dd>{placeOfSupply}{stateCode && STATE_CODES[stateCode] ? ` (${stateCode})` : ''}</dd></>}
+                {placeOfSupply && <><dt>Place of supply</dt><dd>{placeOfSupply}</dd></>}
               </dl>
             </div>
           </header>
+          {doc.declaration && <p className="invoice-declaration">{doc.declaration}</p>}
 
           <section className="invoice-billto">
             <div className="tiny muted invoice-label">Bill to</div>
@@ -145,6 +140,8 @@ export function InvoiceDetail({ invoice: inv, items, payments, customer, salon, 
                 <div className="small ink2 num">{formatPhone(customer.phone)}{customer.email ? ` · ${customer.email}` : ''}</div>
               </>
             ) : <div className="strong">Walk-in client</div>}
+            {inv.client_address && <div className="small ink2">{inv.client_address}</div>}
+            {inv.client_gstin && <div className="small"><span className="muted">GSTIN </span><span className="strong mono">{inv.client_gstin}</span></div>}
           </section>
 
           <table className="invoice-table">
@@ -152,12 +149,12 @@ export function InvoiceDetail({ invoice: inv, items, payments, customer, salon, 
               <tr>
                 <th className="col-n">#</th>
                 <th>Description</th>
-                <th className="col-opt">SAC/HSN</th>
+                {doc.showTax && <th className="col-opt">SAC/HSN</th>}
                 <th className="right">Qty</th>
                 <th className="right col-opt">Rate</th>
                 <th className="right col-opt">Discount</th>
-                <th className="right col-opt">Taxable</th>
-                <th className="right col-opt">GST</th>
+                {doc.showTax && <th className="right col-opt">Taxable</th>}
+                {doc.showTax && <th className="right col-opt">GST</th>}
                 <th className="right">Amount</th>
               </tr>
             </thead>
@@ -170,14 +167,15 @@ export function InvoiceDetail({ invoice: inv, items, payments, customer, salon, 
                     {it.staff_id && staffNames[it.staff_id] && <div className="tiny muted">by {staffNames[it.staff_id]}</div>}
                     <div className="tiny muted show-narrow num">
                       {money2(it.unit_price)} each{Number(it.discount) > 0 ? ` · −${money2(it.discount)} discount` : ''}
+                      {doc.showTax ? ` · GST ${Number(it.gst_rate)}%${it.code ? ` · ${it.kind === 'product' ? 'HSN' : 'SAC'} ${it.code}` : ''}` : ''}
                     </div>
                   </td>
-                  <td className="col-opt num small">{it.kind === 'product' ? '—' : SALON_SAC}</td>
+                  {doc.showTax && <td className="col-opt num small">{it.code ?? (it.kind === 'product' ? '—' : SALON_SAC)}</td>}
                   <td className="right num">{Number(it.qty)}</td>
                   <td className="right num col-opt">{money2(it.unit_price)}</td>
                   <td className="right num col-opt">{Number(it.discount) > 0 ? money2(it.discount) : '—'}</td>
-                  <td className="right num col-opt">{money2(it.taxable)}</td>
-                  <td className="right num col-opt">{Number(it.gst_rate)}%</td>
+                  {doc.showTax && <td className="right num col-opt">{money2(it.taxable)}</td>}
+                  {doc.showTax && <td className="right num col-opt">{Number(it.gst_rate)}%</td>}
                   <td className="right num strong">{money2(it.line_total)}</td>
                 </tr>
               ))}
@@ -186,12 +184,12 @@ export function InvoiceDetail({ invoice: inv, items, payments, customer, salon, 
               <tr>
                 <td className="col-n" />
                 <td className="muted small">{items.length} item{items.length === 1 ? '' : 's'}</td>
-                <td className="col-opt" />
+                {doc.showTax && <td className="col-opt" />}
                 <td className="right num small">{totalQty}</td>
                 <td className="col-opt" />
                 <td className="right num col-opt small">{Number(inv.discount_total) > 0 ? money2(inv.discount_total) : ''}</td>
-                <td className="right num col-opt small">{money2(inv.taxable_total)}</td>
-                <td className="col-opt" />
+                {doc.showTax && <td className="right num col-opt small">{money2(inv.taxable_total)}</td>}
+                {doc.showTax && <td className="col-opt" />}
                 <td />
               </tr>
             </tfoot>
@@ -217,17 +215,33 @@ export function InvoiceDetail({ invoice: inv, items, payments, customer, salon, 
                   </ul>
                 ) : <div className="small ink2">None yet</div>}
               </div>
+              {rateSummary.length > 1 && (
+                <div>
+                  <div className="tiny muted invoice-label">GST summary</div>
+                  <table className="invoice-gst-summary num">
+                    <thead><tr><th>Rate</th><th className="right">Taxable</th><th className="right">CGST</th><th className="right">SGST</th></tr></thead>
+                    <tbody>
+                      {rateSummary.map((r) => {
+                        const c = Math.round((r.tax / 2) * 100) / 100;
+                        return <tr key={r.rate}><td>{r.rate}%</td><td className="right">{money2(r.taxable)}</td><td className="right">{money2(c)}</td><td className="right">{money2(r.tax - c)}</td></tr>;
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
               {inv.notes && <div><div className="tiny muted invoice-label">Note</div><div className="small">{inv.notes}</div></div>}
             </div>
             <dl className="totals invoice-totals">
               <dt>Subtotal</dt><dd>{money2(inv.subtotal)}</dd>
               {Number(inv.discount_total) > 0 && <><dt>Discount</dt><dd>−{money2(inv.discount_total)}</dd></>}
-              <dt>Taxable value</dt><dd>{money2(inv.taxable_total)}</dd>
-              {Number(inv.igst) > 0 ? (
-                <><dt>IGST</dt><dd>{money2(inv.igst)}</dd></>
-              ) : (
-                <><dt>CGST{half}</dt><dd>{money2(inv.cgst)}</dd><dt>SGST{half}</dt><dd>{money2(inv.sgst)}</dd></>
-              )}
+              {doc.showTax && <>
+                <dt>Taxable value</dt><dd>{money2(inv.taxable_total)}</dd>
+                {Number(inv.igst) > 0 ? (
+                  <><dt>IGST</dt><dd>{money2(inv.igst)}</dd></>
+                ) : (
+                  <><dt>CGST{half}</dt><dd>{money2(inv.cgst)}</dd><dt>SGST{half}</dt><dd>{money2(inv.sgst)}</dd></>
+                )}
+              </>}
               {Number(inv.round_off) !== 0 && <><dt>Round off</dt><dd>{Number(inv.round_off) > 0 ? '+' : '−'}{money2(Math.abs(Number(inv.round_off)))}</dd></>}
               <dt className="grand">Total</dt><dd className="grand">{money2(total)}</dd>
               <dt>Paid</dt><dd>{money2(paidTotal)}</dd>
@@ -238,7 +252,7 @@ export function InvoiceDetail({ invoice: inv, items, payments, customer, salon, 
 
           <footer className="invoice-foot">
             <div className="strong">Thank you for visiting {salon.name}!</div>
-            <div className="tiny muted">{inv.prices_include_tax ? 'Prices are inclusive of GST. ' : ''}This is a computer-generated invoice and needs no signature.</div>
+            <div className="tiny muted">{doc.showTax && inv.prices_include_tax ? 'Prices are inclusive of GST. ' : ''}This is a computer-generated {doc.noun} and needs no signature.</div>
           </footer>
         </article>
       </div>
@@ -270,7 +284,7 @@ export function InvoiceDetail({ invoice: inv, items, payments, customer, salon, 
 
       <Dialog open={voidOpen} onClose={() => setVoidOpen(false)} title={`Cancel bill ${inv.invoice_no}?`}
         footer={<><Button variant="ghost" onClick={() => setVoidOpen(false)}>Keep bill</Button><Button variant="danger" loading={pending} onClick={cancelBill}>Cancel bill</Button></>}>
-        <p className="small ink2">The bill stays on record marked as cancelled (GST rules need the number kept). {money(total)} is removed from sales{customer ? ` and from ${customer.name}’s total spend` : ''}.</p>
+        <p className="small ink2">The bill stays on record marked as cancelled (bill numbers must stay in sequence). {money(total)} is removed from sales{customer ? ` and from ${customer.name}’s total spend` : ''}.</p>
         <div className="row-wrap">
           {['Billed twice by mistake', 'Wrong items or amount', 'Client did not take the service'].map((r) => (
             <button key={r} type="button" className="chip chip-sm" aria-pressed={reason === r} onClick={() => setReason(r)}>{r}</button>

@@ -10,13 +10,21 @@ import { createInvoice } from '@/actions/billing';
 import type { ClientLite } from '@/actions/appointments';
 import { computeBill, money } from '@/lib/billing';
 import { coinsText, fmtCoins, usableCoins } from '@/lib/coins';
-import type { PayMethod, Service, ServiceCategory, Staff } from '@/lib/types';
+import { B2C_ADDRESS_LIMIT, billDocument, billTypeFor, BUSINESS_GSTIN_RE, cleanGstin, HSN_RE, PRODUCT_TAX_TYPES } from '@/lib/gst';
+import type { GstMode, PayMethod, Service, ServiceCategory, Staff } from '@/lib/types';
 import { METHOD_LABEL } from '@/lib/types';
 
 export interface PosPrefillLine { serviceId: string | null; name: string; price: number; staffId: string | null; gstRate: number | null }
 
 export interface PosProps {
-  salon: { pricesIncludeTax: boolean; defaultGstRate: number; waConnected: boolean; nextInvoiceNo: string };
+  salon: {
+    /** Which bill this salon issues: no tax lines unless 'regular'. */
+    gstMode: GstMode;
+    pricesIncludeTax: boolean;
+    /** Statutory GST on services today (serviceGstRate). */
+    serviceRate: number;
+    waConnected: boolean; nextInvoiceNo: string;
+  };
   services: Service[];
   categories: ServiceCategory[];
   staff: Staff[];
@@ -26,7 +34,11 @@ export interface PosProps {
 
 interface Line {
   key: string; kind: 'service' | 'product' | 'custom'; serviceId: string | null; staffId: string;
-  name: string; qty: number; unitPrice: number; discount: string; gstRate: number | null;
+  name: string; qty: number; unitPrice: number; discount: string;
+  /** Services: the menu's override (null = statutory). Products: the rate chosen. Other: null (a service). */
+  gstRate: number | null;
+  /** Products: HSN code (optional). */
+  code: string;
 }
 /** `auto` rows take whatever is left of the total until someone types an amount into them. */
 interface PayRow { key: string; method: PayMethod; amount: string; reference: string; auto: boolean }
@@ -44,7 +56,7 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
   const [client, setClient] = useState<ClientLite | null>(prefill?.customer ?? null);
   const [lines, setLines] = useState<Line[]>(() => (prefill?.lines ?? []).map((l) => ({
     key: nextKey(), kind: l.serviceId ? 'service' : 'custom', serviceId: l.serviceId, staffId: l.staffId ?? '',
-    name: l.name, qty: 1, unitPrice: Number(l.price), discount: '', gstRate: l.gstRate,
+    name: l.name, qty: 1, unitPrice: Number(l.price), discount: '', gstRate: l.gstRate, code: '',
   })));
   const [defaultStaff, setDefaultStaff] = useState(prefill?.lines.find((l) => l.staffId)?.staffId ?? '');
   const [pays, setPays] = useState<PayRow[]>(() => [freshPay('upi')]);
@@ -58,7 +70,16 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
   const [customName, setCustomName] = useState('');
   const [customPrice, setCustomPrice] = useState('');
   const [customKind, setCustomKind] = useState<'product' | 'custom'>('product');
+  const [customRate, setCustomRate] = useState<number | null>(null);
+  const [customHsn, setCustomHsn] = useState('');
   const customNameRef = useRef<HTMLInputElement>(null);
+  // Business client (tax invoices): GSTIN and address printed on the bill.
+  const [b2bOpen, setB2bOpen] = useState(false);
+  const [clientGstin, setClientGstin] = useState('');
+  const [clientAddress, setClientAddress] = useState('');
+
+  const regular = salon.gstMode === 'regular';
+  const doc = billDocument(billTypeFor(salon.gstMode));
 
   const coinBalance = Math.max(0, Number(client?.coin_balance ?? 0));
   const firstClient = useRef(true);
@@ -70,9 +91,9 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
   }, [client, salon.waConnected]);
 
   const bill = useMemo(() => computeBill(
-    lines.map((l) => ({ name: l.name, qty: l.qty, unitPrice: l.unitPrice, discount: parseAmount(l.discount), gstRate: l.gstRate })),
-    { pricesIncludeTax: salon.pricesIncludeTax, defaultGstRate: salon.defaultGstRate },
-  ), [lines, salon.pricesIncludeTax, salon.defaultGstRate]);
+    lines.map((l) => ({ kind: l.kind, name: l.name, qty: l.qty, unitPrice: l.unitPrice, discount: parseAmount(l.discount), gstRate: l.gstRate })),
+    { gstMode: salon.gstMode, pricesIncludeTax: salon.pricesIncludeTax, serviceRate: salon.serviceRate },
+  ), [lines, salon.gstMode, salon.pricesIncludeTax, salon.serviceRate]);
 
   const fixedSum = pays.filter((p) => !p.auto).reduce((s, p) => s + parseAmount(p.amount), 0);
   const remainder = Math.max(0, Math.round((bill.total - fixedSum) * 100) / 100);
@@ -88,6 +109,11 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
   const overDiscount = lines.some((l) => parseAmount(l.discount) > l.qty * l.unitPrice);
   const rates = [...new Set(bill.lines.map((l) => l.gstRate))];
   const halfRate = rates.length === 1 ? `${rates[0] / 2}%` : null;
+  const gstinClean = cleanGstin(clientGstin);
+  const gstinBad = regular && !!gstinClean && !BUSINESS_GSTIN_RE.test(gstinClean);
+  const productNoRate = regular && lines.some((l) => l.kind === 'product' && l.gstRate === null);
+  // Rule 46: a tax invoice of ₹50,000 or more to an unregistered client needs their name and address.
+  const needsAddress = regular && bill.total >= B2C_ADDRESS_LIMIT && (!client || !clientAddress.trim());
 
   const groups = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -105,7 +131,7 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
     setLines((cur) => {
       const same = cur.find((l) => l.serviceId === s.id && l.staffId === defaultStaff);
       if (same) return cur.map((l) => (l === same ? { ...l, qty: l.qty + 1 } : l));
-      return [...cur, { key: nextKey(), kind: 'service', serviceId: s.id, staffId: defaultStaff, name: s.name, qty: 1, unitPrice: Number(s.price), discount: '', gstRate: s.gst_rate }];
+      return [...cur, { key: nextKey(), kind: 'service', serviceId: s.id, staffId: defaultStaff, name: s.name, qty: 1, unitPrice: Number(s.price), discount: '', gstRate: s.gst_rate, code: '' }];
     });
   };
 
@@ -114,9 +140,16 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
     const price = parseAmount(customPrice);
     if (!name) { setError('Give the custom item a name.'); customNameRef.current?.focus(); return; }
     if (!price) { setError(`Enter a price for “${name}”.`); return; }
+    const isProduct = customKind === 'product';
+    if (isProduct && regular && customRate === null) { setError(`Choose the product type for “${name}” — it sets the GST rate.`); return; }
+    const hsn = customHsn.trim();
+    if (isProduct && hsn && !HSN_RE.test(hsn)) { setError('HSN code should be 4, 6 or 8 digits, like 3305.'); return; }
     setError(null);
-    setLines((cur) => [...cur, { key: nextKey(), kind: customKind, serviceId: null, staffId: customKind === 'product' ? '' : defaultStaff, name, qty: 1, unitPrice: price, discount: '', gstRate: null }]);
-    setCustomName(''); setCustomPrice('');
+    setLines((cur) => [...cur, {
+      key: nextKey(), kind: customKind, serviceId: null, staffId: isProduct ? '' : defaultStaff, name, qty: 1, unitPrice: price, discount: '',
+      gstRate: isProduct ? (regular ? customRate : 0) : null, code: isProduct ? hsn : '',
+    }]);
+    setCustomName(''); setCustomPrice(''); setCustomHsn('');
     customNameRef.current?.focus();
   };
 
@@ -155,17 +188,21 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
     if (coinsUsed > 0 && coinsBlocked) return setError(coinsBlocked);
     if (coinsShort) return setError(`${client?.name.split(' ')[0] ?? 'The client'} has only ${coinsText(coinBalance)}. Lower the Coins amount.`);
     if (overDiscount) return setError('A discount is more than the item price. Fix it to continue.');
+    if (productNoRate) return setError('Choose the product type (GST rate) for every product on the bill.');
+    if (gstinBad) return setError('Client GSTIN should be 15 characters, like 19ABCDE1234F1Z5. Clear it for a walk-in.');
     if (balance < 0) return setError(`Payments are ${money(-balance)} more than the bill. Correct the amounts.`);
     const r = await createInvoice({
       customerId: client?.id ?? null,
       appointmentId: prefill?.appointmentId ?? null,
       items: lines.map((l) => ({
         kind: l.kind, serviceId: l.serviceId, staffId: l.staffId || null, name: l.name,
-        qty: l.qty, unitPrice: l.unitPrice, discount: parseAmount(l.discount), gstRate: l.gstRate,
+        qty: l.qty, unitPrice: l.unitPrice, discount: parseAmount(l.discount), gstRate: l.gstRate, code: l.code || null,
       })),
       payments: payRows.filter((p) => parseAmount(p.amount) > 0).map((p) => ({ method: p.method, amount: parseAmount(p.amount), reference: p.reference })),
       notes,
       sendOnWhatsApp: sendWa && !!client,
+      clientGstin: regular && b2bOpen ? gstinClean || null : null,
+      clientAddress: regular && (b2bOpen || needsAddress || clientAddress.trim()) ? clientAddress.trim() || null : null,
     });
     if (!r.ok) { setError(r.error); toast(r.error, 'error'); return; }
     toast(r.message ?? 'Bill saved');
@@ -173,7 +210,7 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
   });
 
   const saveLabel = `Save bill · ${money(bill.total)}`;
-  const canSave = lines.length > 0 && !overDiscount && balance >= 0 && !coinsShort;
+  const canSave = lines.length > 0 && !overDiscount && balance >= 0 && !coinsShort && !productNoRate && !gstinBad;
   const payState = !lines.length ? null
     : balance < 0 ? <span className="small strong danger-text">{money(-balance)} more than the bill</span>
     : balance === 0 ? <span className="small strong success-text">Paid in full</span>
@@ -219,15 +256,33 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
                   <Segmented label="Item type" value={customKind} onChange={setCustomKind}
                     options={[{ value: 'product', label: 'Product' }, { value: 'custom', label: 'Other' }]} />
                 </div>
-                <form className="pos-custom-row" onSubmit={(e) => { e.preventDefault(); addCustom(); }}>
-                  <input ref={customNameRef} className="input" placeholder={customKind === 'product' ? 'e.g. Argan oil serum 100 ml' : 'e.g. Hair spa add-on'}
-                    value={customName} onChange={(e) => setCustomName(e.target.value)} aria-label="Item name" />
-                  <div className="prefix-input pos-price">
-                    <span>₹</span>
-                    <input className="input num" inputMode="decimal" placeholder="Price" value={customPrice}
-                      onChange={(e) => setCustomPrice(e.target.value)} aria-label="Item price" />
+                <form className="stack-sm" onSubmit={(e) => { e.preventDefault(); addCustom(); }}>
+                  {customKind === 'product' && regular && (
+                    <div className="pos-tax-types" role="group" aria-label="Product type (sets the GST rate)">
+                      {PRODUCT_TAX_TYPES.map((t) => (
+                        <button key={t.key} type="button" className="chip chip-sm" aria-pressed={customRate === t.rate} title={t.hint}
+                          onClick={() => setCustomRate(t.rate)}>{t.label}</button>
+                      ))}
+                    </div>
+                  )}
+                  <div className="pos-custom-row">
+                    <input ref={customNameRef} className="input" placeholder={customKind === 'product' ? 'e.g. Argan oil serum 100 ml' : 'e.g. Hair spa add-on'}
+                      value={customName} onChange={(e) => setCustomName(e.target.value)} aria-label="Item name" />
+                    <div className="prefix-input pos-price">
+                      <span>₹</span>
+                      <input className="input num" inputMode="decimal" placeholder="Price" value={customPrice}
+                        onChange={(e) => setCustomPrice(e.target.value)} aria-label="Item price" />
+                    </div>
+                    <Button type="submit" icon="plus">Add</Button>
                   </div>
-                  <Button type="submit" icon="plus">Add</Button>
+                  {customKind === 'product' && regular && (
+                    <div className="row-wrap pos-hsn">
+                      <input className="input input-sm num" inputMode="numeric" maxLength={8} placeholder="HSN (optional)" value={customHsn}
+                        onChange={(e) => setCustomHsn(e.target.value.replace(/\D/g, ''))} aria-label="HSN code (optional)" />
+                      <span className="tiny muted">{PRODUCT_TAX_TYPES.find((t) => t.rate === customRate)?.hint ?? 'Pick the type: it sets the GST rate on this product.'}</span>
+                    </div>
+                  )}
+                  {customKind === 'custom' && regular && <span className="tiny muted">Billed as a salon service at {salon.serviceRate}% GST.</span>}
                 </form>
               </section>
             </div>
@@ -237,9 +292,25 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
           <div className="stack pos-bill">
             <Panel title="Client" className="pos-client" actions={!client ? <span className="small muted">Optional for walk-ins</span> : undefined}>
               <ClientPicker value={client} onChange={setClient} />
+              {regular && (b2bOpen || needsAddress) && (
+                <div className="stack-sm pos-b2b">
+                  {b2bOpen && (
+                    <TextField label="Client GSTIN" value={clientGstin} maxLength={15} className="mono-upper" placeholder="19ABCDE1234F1Z5"
+                      onChange={(e) => setClientGstin(e.target.value.toUpperCase().replace(/\s/g, ''))}
+                      error={gstinBad ? 'A GSTIN has 15 letters and numbers, like 19ABCDE1234F1Z5.' : undefined}
+                      hint="Printed on the tax invoice so a business client can claim it." />
+                  )}
+                  <TextField label="Client address" value={clientAddress} maxLength={240} onChange={(e) => setClientAddress(e.target.value)}
+                    placeholder="Business or home address" hint={needsAddress ? undefined : 'Printed under “Bill to”.'} />
+                  {needsAddress && <Notice tone="warn">Tax invoices of {money(B2C_ADDRESS_LIMIT)} or more need the client’s name and address.{!client ? ' Choose the client above.' : ''}</Notice>}
+                </div>
+              )}
+              {regular && !b2bOpen && (
+                <button type="button" className="link-btn small pos-b2b-link" onClick={() => setB2bOpen(true)}>Business client? Add their GSTIN</button>
+              )}
             </Panel>
 
-            <Panel className="pos-lines" title={lines.length ? `Bill · ${lines.length} item${lines.length > 1 ? 's' : ''}` : 'Bill'} flush
+            <Panel className="pos-lines" title={lines.length ? `${doc.title} · ${lines.length} item${lines.length > 1 ? 's' : ''}` : doc.title} flush
               actions={activeStaff.length > 0 && lines.length > 0 ? (
                 <select className="select input-sm pos-default-staff" value={defaultStaff} aria-label="Stylist for new items"
                   onChange={(e) => setDefaultStaff(e.target.value)}>
@@ -259,10 +330,11 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
                         <div className="between" style={{ alignItems: 'flex-start' }}>
                           <div className="grow">
                             <div className="strong">{l.name}</div>
-                            {(l.qty > 1 || l.kind === 'product' || calc.gstRate !== salon.defaultGstRate) && (
+                            {(l.qty > 1 || l.kind === 'product' || (regular && calc.gstRate !== salon.serviceRate)) && (
                               <div className="tiny muted num">
                                 {[l.qty > 1 ? `${money(l.unitPrice)} × ${l.qty}` : '', l.kind === 'product' ? 'Product' : '',
-                                  calc.gstRate !== salon.defaultGstRate ? `GST ${calc.gstRate}%` : ''].filter(Boolean).join(' · ')}
+                                  regular && (l.kind === 'product' || calc.gstRate !== salon.serviceRate) ? (l.gstRate === null && l.kind === 'product' ? 'choose GST' : `GST ${calc.gstRate}%`) : '',
+                                  regular && l.code ? `HSN ${l.code}` : ''].filter(Boolean).join(' · ')}
                               </div>
                             )}
                           </div>
@@ -273,6 +345,13 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
                           <Button size="sm" variant="ghost" icon="x" aria-label={`Remove ${l.name}`} onClick={() => remove(l.key)} />
                         </div>
                         <div className="bill-line-controls">
+                          {l.kind === 'product' && regular && (
+                            <select className="select input-sm pos-line-tax" value={l.gstRate ?? ''} aria-label={`Product type (GST) for ${l.name}`}
+                              aria-invalid={l.gstRate === null || undefined} onChange={(e) => update(l.key, { gstRate: e.target.value === '' ? null : Number(e.target.value) })}>
+                              <option value="">Product type…</option>
+                              {PRODUCT_TAX_TYPES.map((t) => <option key={t.key} value={t.rate}>{t.label}</option>)}
+                            </select>
+                          )}
                           <select className="select input-sm" value={l.staffId} aria-label={`Stylist for ${l.name}`}
                             onChange={(e) => { update(l.key, { staffId: e.target.value }); if (e.target.value) setDefaultStaff(e.target.value); }}>
                             <option value="">{l.kind === 'product' ? 'No stylist' : 'Stylist…'}</option>
@@ -314,13 +393,19 @@ export function PosScreen({ salon, services, categories, staff, prefill }: PosPr
                   <dl className="totals">
                     <dt>Subtotal</dt><dd className="num">{money(bill.subtotal)}</dd>
                     {bill.discountTotal > 0 && <><dt>Discount</dt><dd className="num">−{money(bill.discountTotal)}</dd></>}
-                    <dt className="muted">Taxable value</dt><dd className="num muted">{money(bill.taxableTotal)}</dd>
-                    <dt className="muted">CGST{halfRate ? ` @ ${halfRate}` : ''}</dt><dd className="num muted">{money(bill.cgst)}</dd>
-                    <dt className="muted">SGST{halfRate ? ` @ ${halfRate}` : ''}</dt><dd className="num muted">{money(bill.sgst)}</dd>
+                    {regular && <>
+                      <dt className="muted">Taxable value</dt><dd className="num muted">{money(bill.taxableTotal)}</dd>
+                      <dt className="muted">CGST{halfRate ? ` @ ${halfRate}` : ''}</dt><dd className="num muted">{money(bill.cgst)}</dd>
+                      <dt className="muted">SGST{halfRate ? ` @ ${halfRate}` : ''}</dt><dd className="num muted">{money(bill.sgst)}</dd>
+                    </>}
                     {bill.roundOff !== 0 && <><dt className="muted">Round off</dt><dd className="num muted">{bill.roundOff > 0 ? '+' : '−'}{money(Math.abs(bill.roundOff))}</dd></>}
                     <dt className="grand">Total</dt><dd className="grand num">{money(bill.total)}</dd>
                   </dl>
-                  <div className="tiny muted" style={{ marginTop: 6 }}>{salon.pricesIncludeTax ? 'Prices include GST.' : 'GST is added to prices.'}</div>
+                  <div className="tiny muted" style={{ marginTop: 6 }}>
+                    {regular ? (salon.pricesIncludeTax ? 'Prices include GST.' : 'GST is added to prices.')
+                      : salon.gstMode === 'composition' ? 'Bill of supply: no GST is charged to the client (composition scheme).'
+                      : 'No GST on this bill — your salon isn’t GST registered.'}
+                  </div>
                 </div>
               )}
             </Panel>
